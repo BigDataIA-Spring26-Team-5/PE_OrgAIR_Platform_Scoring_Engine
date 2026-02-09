@@ -12,7 +12,7 @@ from app.routers.health import router as health_router
 from app.routers.assessments import router as assessments_router
 from app.routers.dimensionScores import router as dimension_scores_router
 from app.routers.documents import router as documents_router
-from app.routers.pdf_parser import router as pdf_parser_router
+# from app.routers.pdf_parser import router as pdf_parser_router
 from app.routers.signals import router as signals_router
 from app.routers.evidence import router as evidence_router
 
@@ -38,7 +38,7 @@ app.include_router(health_router)
 app.include_router(industries_router)
 app.include_router(companies_router)
 app.include_router(documents_router)
-app.include_router(pdf_parser_router)
+# app.include_router(pdf_parser_router)
 app.include_router(signals_router)
 app.include_router(assessments_router)
 app.include_router(dimension_scores_router)
