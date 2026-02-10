@@ -19,3 +19,6 @@ Group diversity — More technology categories = more sophisticated stack (CDN, 
 Category depth — More sub-categories = deeper investment
 Active maintenance ratio — live/(live+dead) shows they're actively maintaining their stack
 Wappalyzer AI bonus — If specific AI tools are detected (TensorFlow, Kubernetes, etc.), they get extra points
+
+
+-- dedup in the snowflake scores
