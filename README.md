@@ -22,3 +22,30 @@ Wappalyzer AI bonus — If specific AI tools are detected (TensorFlow, Kubernete
 
 
 -- dedup in the snowflake scores
+
+Looking at the data more carefully — JPM got 100 patents from the API, and 22 were classified as AI-related. Let me verify the score:
+
+Volume: min(22 * 5, 50) = 50 ✅ (maxed out, only need 10 AI patents)
+Recency: min(recent_ai * 2, 20) = likely 20 ✅ (most patents are from 2025, so 10+ AI patents in last year maxes this)
+Diversity: min(3 * 10, 30) = 30 ✅ (deep_learning, nlp, computer_vision — 3 categories)
+
+Total: 100/100
+The math is correct per the PDF formula. But is the score meaningful? That's debatable.
+The problem is the PDF's formula is easy to max out:
+
+Only need 10 AI patents to max volume (10 × 5 = 50)
+Only need 10 recent AI patents to max recency (10 × 2 = 20)
+Only need 3 categories to max diversity (3 × 10 = 30)
+
+JPM has 22 AI patents across 3+ categories, mostly recent — so it easily maxes every component. Companies like GS, WMT, DE would likely also score 100 or very close.
+But this is what the PDF spec says to do. The formula comes directly from pages 18-19. If your professor designed it this way, it might be intentional — the differentiation between companies would come from the composite score across all 4 signals, not from patents alone.
+
+-Patent Scoring (CS2 — pages 18-19):
+The formula min(ai*5, 50) + min(recent*2, 20) + min(categories*10, 30) saturates easily. JPM hitting 100/100 with just 22 AI patents is technically correct per spec. Any large company with ≥10 AI patents, ≥10 recent ones, and ≥3 categories will max out.
+The bigger picture for CS3:
+The patent score feeds into CS3 as the innovation_activity signal, which maps to multiple dimensions (Technology Stack at 0.50 weight, Use Case Portfolio at 0.30, Data Infrastructure at 0.20). So even if patent scores are saturated, the composite scoring through the evidence mapper, rubric scorer, and VR calculation will create differentiation.
+
+- DE (Deere) hiring score of 2.0 reflects a point-in-time snapshot. John Deere actively hires ML engineers and data scientists (63+ roles on LinkedIn), but their AI-specific postings cycle in and out of the 72-hour scraping window. Their innovation score of 93.0 (9 AI patents in computer vision and precision agriculture) more accurately reflects their AI investment.
+
+- Dollar General only recently created an SVP of AI Optimization role in November 2025 — this is brand new for them. Retail Dive They partnered with Shelf Engine's AI for produce ordering, but that's a vendor relationship, not internal AI hiring. Supply Chain Dive Dollar General is a discount retailer with 19,000+ stores focused on low-cost operations — they have minimal in-house tech capability. The 0.0 hiring score (only 1 tech job out of 39 total, 0 AI) is accurate.
+For patents, Dollar General's AI efforts are very recent (2024-2025) and vendor-driven, not R&D-driven. Retail Dive A discount retailer with no R&D lab having 0 patents is completely expected.
