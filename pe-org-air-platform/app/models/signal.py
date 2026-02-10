@@ -1,3 +1,4 @@
+#app/models/signal.py
 from pydantic import BaseModel, Field, model_validator
 from uuid import UUID, uuid4
 from datetime import datetime, timezone
@@ -25,7 +26,9 @@ class SignalSource(str, Enum):
     PRESS_RELEASE = "press_release"
     COMPANY_WEBSITE = "company_website"
     # SEC Filing Source (for Leadership)
-    SEC_FILING = "sec_filing"
+    SEC_FILING = "sec_filing" 
+    WAPPALYZER = "wappalyzer"
+    BUILTWITH_WAPPALYZER = "builtwith_wappalyzer"
 
 
 class ExternalSignal(BaseModel):

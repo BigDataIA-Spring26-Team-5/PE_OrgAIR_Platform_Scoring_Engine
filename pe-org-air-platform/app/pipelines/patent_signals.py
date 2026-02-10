@@ -25,7 +25,8 @@ from uuid import uuid4
 import httpx
 from dotenv import load_dotenv
 
-from app.pipelines.pipeline2_state import Pipeline2State
+# from app.pipelines.pipeline2_state import Pipeline2State
+from app.pipelines.signal_pipeline_state import SignalPipelineState as Pipeline2State
 from app.pipelines.utils import clean_nan, safe_filename
 from app.models.signal import SignalCategory, SignalSource, ExternalSignal
 from app.services.s3_storage import get_s3_service

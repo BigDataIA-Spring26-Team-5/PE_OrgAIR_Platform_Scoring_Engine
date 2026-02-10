@@ -3,7 +3,8 @@ import logging
 from typing import Dict, List, Optional
 from datetime import datetime, timezone
 from app.pipelines.patent_signals import run_patent_signals
-from app.pipelines.pipeline2_state import Pipeline2State
+# from app.pipelines.pipeline2_state import Pipeline2State
+from app.pipelines.signal_pipeline_state import SignalPipelineState as Pipeline2State
 from app.services.s3_storage import get_s3_service
 from app.repositories.company_repository import CompanyRepository
 from app.repositories.signal_repository import get_signal_repository

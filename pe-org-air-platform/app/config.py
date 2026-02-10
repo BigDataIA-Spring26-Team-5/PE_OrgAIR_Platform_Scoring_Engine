@@ -14,58 +14,69 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # - "aliases": All valid variations for fuzzy matching (includes search name)
 # =============================================================================
 
-COMPANY_NAME_MAPPINGS: Dict[str, Dict[str, any]] = {
+COMPANY_NAME_MAPPINGS = {
     "CAT": {
         "official": "Caterpillar Inc.",
         "search": "Caterpillar",
-        "aliases": ["Caterpillar", "Caterpillar Inc", "Caterpillar Inc.", "CAT"]
+        "domain": "caterpillar.com",
+        "aliases": ["Caterpillar", "Caterpillar Inc", "Caterpillar Inc.", "CAT"],
     },
     "DE": {
         "official": "Deere & Company",
         "search": "John Deere",
-        "aliases": ["John Deere", "Deere", "Deere & Company", "JD"]
+        "domain": "deere.com",
+        "aliases": ["John Deere", "Deere", "Deere & Company", "JD"],
     },
     "UNH": {
         "official": "UnitedHealth Group Incorporated",
         "search": "UnitedHealth",
-        "aliases": ["UnitedHealth", "UnitedHealth Group", "United Health", "UnitedHealthcare", "UHG"]
+        "domain": "unitedhealthgroup.com",
+        "aliases": ["UnitedHealth", "UnitedHealth Group", "United Health", "UnitedHealthcare", "UHG"],
     },
     "HCA": {
         "official": "HCA Healthcare, Inc.",
         "search": "HCA Healthcare",
-        "aliases": ["HCA Healthcare", "HCA", "HCA Inc", "Hospital Corporation of America"]
+        "domain": "hcahealthcare.com",
+        "aliases": ["HCA Healthcare", "HCA", "HCA Inc", "Hospital Corporation of America"],
     },
     "ADP": {
         "official": "Automatic Data Processing, Inc.",
         "search": "ADP",
-        "aliases": ["ADP", "Automatic Data Processing", "ADP Inc"]
+        "domain": "adp.com",
+        "aliases": ["ADP", "Automatic Data Processing", "ADP Inc"],
     },
     "PAYX": {
         "official": "Paychex, Inc.",
         "search": "Paychex",
-        "aliases": ["Paychex", "Paychex Inc", "Paychex Inc."]
+        "domain": "paychex.com",
+        "aliases": ["Paychex", "Paychex Inc", "Paychex Inc."],
     },
     "WMT": {
         "official": "Walmart Inc.",
         "search": "Walmart",
-        "aliases": ["Walmart", "Walmart Inc", "Walmart Inc.", "Wal-Mart", "Wal Mart"]
+        "domain": "walmart.com",
+        "aliases": ["Walmart", "Walmart Inc", "Walmart Inc.", "Wal-Mart", "Wal Mart"],
     },
     "TGT": {
         "official": "Target Corporation",
         "search": "Target",
-        "aliases": ["Target", "Target Corporation", "Target Corp"]
+        "domain": "target.com",
+        "aliases": ["Target", "Target Corporation", "Target Corp"],
     },
     "JPM": {
         "official": "JPMorgan Chase & Co.",
         "search": "JPMorgan Chase",
-        "aliases": ["JPMorgan Chase", "JPMorgan", "JP Morgan", "Chase", "J.P. Morgan", "JPMC"]
+        "domain": "jpmorganchase.com",
+        "aliases": ["JPMorgan Chase", "JPMorgan", "JP Morgan", "Chase", "J.P. Morgan", "JPMC"],
     },
     "GS": {
         "official": "The Goldman Sachs Group, Inc.",
         "search": "Goldman Sachs",
-        "aliases": ["Goldman Sachs", "Goldman", "GS", "Goldman Sachs Group"]
+        "domain": "goldmansachs.com",
+        "aliases": ["Goldman Sachs", "Goldman", "GS", "Goldman Sachs Group"],
     },
 }
+
 
 
 def get_company_search_name(ticker: str) -> Optional[str]:
@@ -183,7 +194,12 @@ class Settings(BaseSettings):
         le=10,
         description="SEC limits to 10 requests per second"
     )
-    
+    # BuiltWith Free API
+    BUILTWITH_API_KEY: Optional[str] = Field(
+        default=None,
+        description="BuiltWith Free API key for tech stack detection"
+    )
+
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"
     CACHE_TTL_SECTORS: int = 86400  # 24 hours

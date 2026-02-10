@@ -1,17 +1,17 @@
-"""
-Signals API Router
-app/routers/signals.py
+# """
+# Signals API Router
+# app/routers/signals.py
 
-Endpoints:
-- DELETE /api/v1/signals/reset              - Delete all signals for all companies
-- DELETE /api/v1/signals/reset/{ticker}     - Delete all signals for a company
-- DELETE /api/v1/signals/reset/{ticker}/{category} - Delete signals by category
-- POST  /api/v1/signals/collect             - Trigger signal collection for a company
-- GET   /api/v1/signals/tasks/{task_id}     - Get task status
-- GET   /api/v1/signals                     - List signals (filterable)
-- GET   /api/v1/companies/{id}/signals      - Get signal summary for company
-- GET   /api/v1/companies/{id}/signals/{category} - Get signals by category
-"""
+# Endpoints:
+# - DELETE /api/v1/signals/reset              - Delete all signals for all companies
+# - DELETE /api/v1/signals/reset/{ticker}     - Delete all signals for a company
+# - DELETE /api/v1/signals/reset/{ticker}/{category} - Delete signals by category
+# - POST  /api/v1/signals/collect             - Trigger signal collection for a company
+# - GET   /api/v1/signals/tasks/{task_id}     - Get task status
+# - GET   /api/v1/signals                     - List signals (filterable)
+# - GET   /api/v1/companies/{id}/signals      - Get signal summary for company
+# - GET   /api/v1/companies/{id}/signals/{category} - Get signals by category
+# """
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -23,14 +23,27 @@ import logging
 import boto3
 import os
 
+import logging
+import os
+from enum import Enum
+from typing import Any, Optional, Dict, List
+from typing import Optional
 from app.services.leadership_service import get_leadership_service
 from app.services.job_signal_service import get_job_signal_service
+from app.services.job_data_service import get_job_data_service
 from app.services.tech_signal_service import get_tech_signal_service
 from app.services.patent_signal_service import get_patent_signal_service
 from app.repositories.signal_repository import get_signal_repository
 from app.repositories.company_repository import CompanyRepository
 from app.repositories.signal_scores_repository import SignalScoresRepository
 from app.services.s3_storage import get_s3_service
+
+# from app.services.job_signal_service import get_tech_signal_service
+# from app.services.tech_signal_service import get_tech_signal_service
+# from app.services.patent_signal_service import get_patent_signal_service
+# from app.services.leadership_service import get_leadership_service
+# from app.repositories.company_repository import CompanyRepository
+from app.repositories.signal_repository import get_signal_repository
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +149,42 @@ class SignalDetail(BaseModel):
     evidence_count: int = 0
     signal_date: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
+
+
+class SingleSignalResponse(BaseModel):
+    """Response for a single signal category scoring."""
+    ticker: str
+    category: str
+    status: str  # "success" or "failed"
+    score: Optional[float] = None
+    confidence: Optional[float] = None
+    breakdown: Optional[Dict[str, Any]] = None
+    data_source: Optional[str] = None
+    evidence_count: Optional[int] = None
+    error: Optional[str] = None
+    duration_seconds: Optional[float] = None
+
+
+class AllSignalsResponse(BaseModel):
+    """Response for scoring all categories."""
+    ticker: str
+    company_name: Optional[str] = None
+    results: Dict[str, SingleSignalResponse]
+    composite_score: Optional[float] = None
+    total_duration_seconds: Optional[float] = None
+
+
+class CompanyScoreStatus(BaseModel):
+    """Current score status for a company."""
+    ticker: str
+    company_name: Optional[str] = None
+    company_id: Optional[str] = None
+    technology_hiring: Optional[Dict[str, Any]] = None
+    digital_presence: Optional[Dict[str, Any]] = None
+    innovation_activity: Optional[Dict[str, Any]] = None
+    leadership_signals: Optional[Dict[str, Any]] = None
+    composite_score: Optional[float] = None
+    last_updated: Optional[str] = None
 
 
 
@@ -644,7 +693,7 @@ async def run_signal_collection(
 
         try:
             if category == "technology_hiring":
-                service = get_job_signal_service()
+                service = get_job_data_service()
                 signal_result = await service.analyze_company(ticker, force_refresh=force_refresh)
                 result["signals"]["technology_hiring"] = {
                     "status": "success",
@@ -771,3 +820,385 @@ async def reset_signals(ticker: str):
     )
 
     return result
+
+"""
+Individual Signal Scoring Endpoints
+====================================
+ADD these endpoints to your existing app/routers/signals.py
+
+These let you trigger and view each signal category separately
+per company, so you can test and debug each pipeline independently.
+
+Endpoints:
+  POST /api/v1/signals/score/{ticker}/hiring        — Run technology_hiring only
+  POST /api/v1/signals/score/{ticker}/digital        — Run digital_presence only
+  POST /api/v1/signals/score/{ticker}/innovation     — Run innovation_activity only
+  POST /api/v1/signals/score/{ticker}/leadership     — Run leadership_signals only
+  POST /api/v1/signals/score/{ticker}/all            — Run all 4 categories
+  GET  /api/v1/signals/score/{ticker}/status         — Get all scores for a company
+"""
+
+
+# =============================================================================
+# Response Models
+# =============================================================================
+
+# =============================================================================
+# POST /api/v1/signals/score/{ticker}/hiring
+# =============================================================================
+
+@router.post(
+    "/signals/score/{ticker}/hiring",
+    response_model=SingleSignalResponse,
+    summary="Score technology hiring for a company",
+    description="""
+    Run the technology_hiring signal pipeline for a single company.
+    
+    **Source:** Job postings from LinkedIn, Indeed, Glassdoor (via JobSpy)
+    **What it measures:** Is this company actively hiring AI/ML talent?
+    **CS3 feeds:** Talent (0.70), Tech Stack (0.20), Culture (0.10)
+    """,
+    tags=["Signal Scoring"],
+)
+async def score_hiring(ticker: str, force_refresh: bool = False):
+    """Score technology hiring signal for one company."""
+    import time
+    start = time.time()
+    
+    try:
+        service = get_job_signal_service()
+        result = await service.analyze_company(ticker.upper(), force_refresh=force_refresh)
+        
+        return SingleSignalResponse(
+            ticker=ticker.upper(),
+            category="technology_hiring",
+            status="success",
+            score=result.get("normalized_score"),
+            confidence=result.get("confidence"),
+            breakdown=result.get("breakdown"),
+            data_source="jobspy (linkedin, indeed, glassdoor)",
+            evidence_count=result.get("job_postings_analyzed", 0),
+            duration_seconds=round(time.time() - start, 2),
+        )
+    except Exception as e:
+        logger.error(f"Hiring scoring failed for {ticker}: {e}")
+        return SingleSignalResponse(
+            ticker=ticker.upper(),
+            category="technology_hiring",
+            status="failed",
+            error=str(e),
+            duration_seconds=round(time.time() - start, 2),
+        )
+
+
+# =============================================================================
+# POST /api/v1/signals/score/{ticker}/digital
+# =============================================================================
+
+@router.post(
+    "/signals/score/{ticker}/digital",
+    response_model=SingleSignalResponse,
+    summary="Score digital presence for a company",
+    description="""
+    Run the digital_presence signal pipeline for a single company.
+    
+    **Source:** BuiltWith Free API + Wappalyzer (website tech stack scanning)
+    **What it measures:** What technologies does this company actually deploy?
+    **CS3 feeds:** Data Infrastructure (0.60), Technology Stack (0.40)
+    """,
+    tags=["Signal Scoring"],
+)
+async def score_digital_presence(ticker: str, force_refresh: bool = False):
+    """Score digital presence signal for one company."""
+    import time
+    start = time.time()
+    
+    try:
+        service = get_tech_signal_service()
+        result = await service.analyze_company(ticker.upper(), force_refresh=force_refresh)
+        
+        return SingleSignalResponse(
+            ticker=ticker.upper(),
+            category="digital_presence",
+            status="success",
+            score=result.get("normalized_score"),
+            confidence=result.get("confidence"),
+            breakdown=result.get("breakdown"),
+            data_source=", ".join(result.get("data_sources", ["builtwith", "wappalyzer"])),
+            evidence_count=result.get("tech_metrics", {}).get("total_technologies", 0),
+            duration_seconds=round(time.time() - start, 2),
+        )
+    except Exception as e:
+        logger.error(f"Digital presence scoring failed for {ticker}: {e}")
+        return SingleSignalResponse(
+            ticker=ticker.upper(),
+            category="digital_presence",
+            status="failed",
+            error=str(e),
+            duration_seconds=round(time.time() - start, 2),
+        )
+
+
+# =============================================================================
+# POST /api/v1/signals/score/{ticker}/innovation
+# =============================================================================
+
+@router.post(
+    "/signals/score/{ticker}/innovation",
+    response_model=SingleSignalResponse,
+    summary="Score innovation activity for a company",
+    description="""
+    Run the innovation_activity signal pipeline for a single company.
+    
+    **Source:** PatentsView API (USPTO patent data)
+    **What it measures:** Is this company innovating in AI? How many AI patents?
+    **CS3 feeds:** Technology Stack (0.50), Use Case Portfolio (0.30), Data Infra (0.20)
+    """,
+    tags=["Signal Scoring"],
+)
+async def score_innovation(ticker: str, years_back: int = 5):
+    """Score innovation activity signal for one company."""
+    import time
+    start = time.time()
+    
+    try:
+        service = get_patent_signal_service()
+        result = await service.analyze_company(ticker.upper(), years_back=years_back)
+        
+        return SingleSignalResponse(
+            ticker=ticker.upper(),
+            category="innovation_activity",
+            status="success",
+            score=result.get("normalized_score"),
+            confidence=result.get("confidence"),
+            breakdown=result.get("breakdown"),
+            data_source="patentsview (USPTO)",
+            evidence_count=result.get("patent_metrics", {}).get("total_patents", 
+                          result.get("total_patents", 0)),
+            duration_seconds=round(time.time() - start, 2),
+        )
+    except Exception as e:
+        logger.error(f"Innovation scoring failed for {ticker}: {e}")
+        return SingleSignalResponse(
+            ticker=ticker.upper(),
+            category="innovation_activity",
+            status="failed",
+            error=str(e),
+            duration_seconds=round(time.time() - start, 2),
+        )
+
+
+# =============================================================================
+# POST /api/v1/signals/score/{ticker}/leadership
+# =============================================================================
+
+@router.post(
+    "/signals/score/{ticker}/leadership",
+    response_model=SingleSignalResponse,
+    summary="Score leadership signals for a company",
+    description="""
+    Run the leadership_signals pipeline for a single company.
+    
+    **Source:** SEC DEF-14A proxy statements (executive comp, board composition)
+    **What it measures:** Is leadership committed to AI? Tech executives present?
+    **CS3 feeds:** Leadership (0.60), AI Governance (0.25), Culture (0.15)
+    """,
+    tags=["Signal Scoring"],
+)
+async def score_leadership(ticker: str):
+    """Score leadership signals for one company."""
+    import time
+    start = time.time()
+    
+    try:
+        service = get_leadership_service()
+        result = await service.analyze_company(ticker.upper())
+        
+        return SingleSignalResponse(
+            ticker=ticker.upper(),
+            category="leadership_signals",
+            status="success",
+            score=result.get("normalized_score"),
+            confidence=result.get("confidence"),
+            breakdown=result.get("breakdown"),
+            data_source="sec_edgar (DEF 14A proxy statements)",
+            evidence_count=result.get("filing_count_analyzed",
+                          result.get("filings_analyzed", 0)),
+            duration_seconds=round(time.time() - start, 2),
+        )
+    except Exception as e:
+        logger.error(f"Leadership scoring failed for {ticker}: {e}")
+        return SingleSignalResponse(
+            ticker=ticker.upper(),
+            category="leadership_signals",
+            status="failed",
+            error=str(e),
+            duration_seconds=round(time.time() - start, 2),
+        )
+
+
+# =============================================================================
+# POST /api/v1/signals/score/{ticker}/all
+# =============================================================================
+
+@router.post(
+    "/signals/score/{ticker}/all",
+    response_model=AllSignalsResponse,
+    summary="Score ALL signal categories for a company",
+    description="""
+    Run all 4 signal pipelines for a single company sequentially.
+    Returns individual results for each category plus composite score.
+    
+    **Categories run:**
+    1. technology_hiring (JobSpy)
+    2. digital_presence (BuiltWith + Wappalyzer)  
+    3. innovation_activity (PatentsView)
+    4. leadership_signals (SEC DEF-14A)
+    
+    **Composite = 0.30×hiring + 0.25×innovation + 0.25×digital + 0.20×leadership**
+    """,
+    tags=["Signal Scoring"],
+)
+async def score_all_signals(ticker: str, force_refresh: bool = False):
+    """Score all signal categories for one company."""
+    import time
+    overall_start = time.time()
+    ticker = ticker.upper()
+    
+    # Look up company name
+    company_repo = CompanyRepository()
+    company = company_repo.get_by_ticker(ticker)
+    company_name = company.get("name", ticker) if company else ticker
+    
+    results = {}
+    
+    # 1. Hiring
+    logger.info(f"{'='*60}")
+    logger.info(f"📊 SCORING ALL SIGNALS FOR: {ticker}")
+    logger.info(f"{'='*60}")
+    
+    logger.info(f"\n🔹 [1/4] Technology Hiring...")
+    results["technology_hiring"] = await score_hiring(ticker, force_refresh)
+    
+    logger.info(f"\n🔹 [2/4] Digital Presence...")
+    results["digital_presence"] = await score_digital_presence(ticker, force_refresh)
+    
+    logger.info(f"\n🔹 [3/4] Innovation Activity...")
+    results["innovation_activity"] = await score_innovation(ticker)
+    
+    logger.info(f"\n🔹 [4/4] Leadership Signals...")
+    results["leadership_signals"] = await score_leadership(ticker)
+    
+    # Calculate composite
+    scores = {
+        "technology_hiring": results["technology_hiring"].score,
+        "innovation_activity": results["innovation_activity"].score,
+        "digital_presence": results["digital_presence"].score,
+        "leadership_signals": results["leadership_signals"].score,
+    }
+    
+    composite = None
+    if all(s is not None for s in scores.values()):
+        composite = round(
+            0.30 * scores["technology_hiring"]
+            + 0.25 * scores["innovation_activity"]
+            + 0.25 * scores["digital_presence"]
+            + 0.20 * scores["leadership_signals"],
+            2,
+        )
+        
+        # Update summary in Snowflake
+        if company:
+            try:
+                signal_repo = get_signal_repository()
+                signal_repo.upsert_summary(
+                    company_id=str(company["id"]),
+                    ticker=ticker,
+                    hiring_score=scores["technology_hiring"],
+                    digital_score=scores["digital_presence"],
+                    innovation_score=scores["innovation_activity"],
+                    leadership_score=scores["leadership_signals"],
+                )
+            except Exception as e:
+                logger.warning(f"Failed to update composite summary: {e}")
+    
+    total_duration = round(time.time() - overall_start, 2)
+    
+    logger.info(f"\n{'='*60}")
+    logger.info(f"📊 ALL SIGNALS COMPLETE FOR: {ticker}")
+    logger.info(f"   Hiring:     {scores.get('technology_hiring', 'N/A')}")
+    logger.info(f"   Digital:    {scores.get('digital_presence', 'N/A')}")
+    logger.info(f"   Innovation: {scores.get('innovation_activity', 'N/A')}")
+    logger.info(f"   Leadership: {scores.get('leadership_signals', 'N/A')}")
+    logger.info(f"   COMPOSITE:  {composite}")
+    logger.info(f"   Duration:   {total_duration}s")
+    logger.info(f"{'='*60}")
+    
+    return AllSignalsResponse(
+        ticker=ticker,
+        company_name=company_name,
+        results=results,
+        composite_score=composite,
+        total_duration_seconds=total_duration,
+    )
+
+
+# =============================================================================
+# GET /api/v1/signals/score/{ticker}/status
+# =============================================================================
+
+@router.get(
+    "/signals/score/{ticker}/status",
+    response_model=CompanyScoreStatus,
+    summary="Get current scores for a company",
+    description="""
+    Get the latest stored scores for all signal categories.
+    Does NOT trigger new collection — just reads existing data from Snowflake.
+    """,
+    tags=["Signal Scoring"],
+)
+async def get_score_status(ticker: str):
+    """Get current signal scores for a company."""
+    ticker = ticker.upper()
+    
+    company_repo = CompanyRepository()
+    company = company_repo.get_by_ticker(ticker)
+    if not company:
+        raise HTTPException(status_code=404, detail=f"Company not found: {ticker}")
+    
+    company_id = str(company["id"])
+    signal_repo = get_signal_repository()
+    
+    # Get summary from Snowflake
+    summary = signal_repo.get_summary_by_ticker(ticker)
+    
+    # Get latest signal per category
+    categories = ["technology_hiring", "digital_presence", "innovation_activity", "leadership_signals"]
+    category_data = {}
+    
+    for cat in categories:
+        signals = signal_repo.get_signals_by_category(company_id, cat)
+        if signals:
+            latest = signals[0]  # Most recent
+            category_data[cat] = {
+                "score": latest.get("normalized_score"),
+                "confidence": latest.get("confidence"),
+                "source": latest.get("source"),
+                "signal_date": latest.get("signal_date"),
+                "evidence_count": latest.get("evidence_count"),
+                "raw_value": latest.get("raw_value"),
+            }
+        else:
+            category_data[cat] = None
+    
+    return CompanyScoreStatus(
+        ticker=ticker,
+        company_name=company.get("name"),
+        company_id=company_id,
+        technology_hiring=category_data.get("technology_hiring"),
+        digital_presence=category_data.get("digital_presence"),
+        innovation_activity=category_data.get("innovation_activity"),
+        leadership_signals=category_data.get("leadership_signals"),
+        composite_score=summary.get("composite_score") if summary else None,
+        last_updated=summary.get("updated_at") if summary else None,
+    )
