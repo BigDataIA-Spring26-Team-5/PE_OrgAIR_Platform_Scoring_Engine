@@ -45,6 +45,10 @@ from app.services.s3_storage import get_s3_service
 # from app.repositories.company_repository import CompanyRepository
 from app.repositories.signal_repository import get_signal_repository
 
+from app.config import get_job_search_names, get_company_search_name
+print(f"GE job_search_names: {get_job_search_names('GE')}")
+print(f"GE search: {get_company_search_name('GE')}")
+
 logger = logging.getLogger(__name__)
 
 # In-memory task status store (in production, use Redis or database)
