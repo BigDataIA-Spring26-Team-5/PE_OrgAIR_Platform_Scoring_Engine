@@ -1449,21 +1449,33 @@ class BuiltWithClient:
 # ---------------------------------------------------------------------------
 
 class WappalyzerClient:
-    """Client using python-Wappalyzer for real-time website tech detection."""
+    """Client using python-Wappalyzer for real-time website tech detection.
+
+    FIX (v2): Uses requests with configurable timeout + retry instead of
+    WebPage.new_from_url which has a hardcoded 10s timeout. This fixes
+    the CAT (caterpillar.com) timeout issue where Wappalyzer returned
+    nothing and confidence dropped to 0.70.
+    """
+
+    DEFAULT_TIMEOUT = 20       # seconds (was 10 via new_from_url)
+    DEFAULT_RETRIES = 2
+    USER_AGENT = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/120.0.0.0 Safari/537.36"
+    )
 
     def __init__(self):
         self._available = False
         self._wappalyzer_cls = None
         self._webpage_cls = None
         try:
-            # Ensure pkg_resources is available (needed by python-Wappalyzer)
             import importlib
             import warnings
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", DeprecationWarning)
-                # Force setuptools to load pkg_resources
                 if importlib.util.find_spec("pkg_resources") is None:
-                    import setuptools  # noqa: F401 — triggers pkg_resources registration
+                    import setuptools  # noqa: F401
                 import pkg_resources  # noqa: F401
                 from Wappalyzer import Wappalyzer, WebPage
             self._wappalyzer_cls = Wappalyzer
@@ -1480,37 +1492,134 @@ class WappalyzerClient:
     def is_available(self) -> bool:
         return self._available
 
-    def analyze_url(self, url: str) -> Dict[str, List[str]]:
+    def analyze_url(
+        self,
+        url: str,
+        timeout: int = None,
+        retries: int = None,
+    ) -> Dict[str, List[str]]:
         """
         Analyze a URL and return detected technologies with categories.
 
+        Uses requests library with configurable timeout and retry logic
+        instead of WebPage.new_from_url (which has a hardcoded 10s timeout
+        that causes failures on slow corporate sites like caterpillar.com).
+
+        Args:
+            url: Full URL to scan (e.g. "https://www.caterpillar.com")
+            timeout: Request timeout in seconds (default 20)
+            retries: Number of retry attempts on timeout (default 2)
+
         Returns:
-            Dict like {"React": ["JavaScript frameworks"], "Node.js": ["Web servers"], ...}
+            Dict like {"React": ["JavaScript frameworks"], "Node.js": ["Web servers"]}
         """
         if not self._available:
             return {}
 
-        try:
-            wappalyzer = self._wappalyzer_cls.latest()
-            webpage = self._webpage_cls.new_from_url(url)
-            results = wappalyzer.analyze_with_categories(webpage)
+        import requests as req_lib
 
-            # Flatten: {tech_name: {categories: [...]}} -> {tech_name: [cat_names]}
-            tech_categories = {}
-            for tech_name, info in results.items():
-                cats = info.get("categories", [])
-                if isinstance(cats, list):
-                    tech_categories[tech_name] = cats
-                elif isinstance(cats, dict):
-                    tech_categories[tech_name] = list(cats.values())
-                else:
-                    tech_categories[tech_name] = [str(cats)]
+        timeout = timeout or self.DEFAULT_TIMEOUT
+        retries = retries or self.DEFAULT_RETRIES
 
-            return tech_categories
+        for attempt in range(1, retries + 1):
+            try:
+                wappalyzer = self._wappalyzer_cls.latest()
 
-        except Exception as e:
-            logger.error(f"Wappalyzer analysis failed for {url}: {e}")
-            return {}
+                # Fetch page with explicit timeout + realistic User-Agent
+                try:
+                    response = req_lib.get(
+                        url,
+                        timeout=timeout,
+                        headers={"User-Agent": self.USER_AGENT},
+                        allow_redirects=True,
+                        verify=True,
+                    )
+                    webpage = self._webpage_cls.new_from_response(response)
+
+                except req_lib.exceptions.Timeout:
+                    if attempt < retries:
+                        logger.warning(
+                            f"Wappalyzer timeout for {url} "
+                            f"(attempt {attempt}/{retries}), retrying with "
+                            f"timeout={timeout + 5}s..."
+                        )
+                        timeout += 5  # increase timeout on retry
+                        continue
+                    logger.error(
+                        f"Wappalyzer timed out for {url} after {retries} attempts"
+                    )
+                    return {}
+
+                except req_lib.exceptions.ConnectionError as e:
+                    if attempt < retries:
+                        logger.warning(
+                            f"Wappalyzer connection error for {url} "
+                            f"(attempt {attempt}/{retries}): {e}, retrying..."
+                        )
+                        continue
+                    logger.error(f"Wappalyzer connection failed for {url}: {e}")
+                    return {}
+
+                except req_lib.exceptions.RequestException as e:
+                    logger.error(f"Wappalyzer request failed for {url}: {e}")
+                    return {}
+
+                # Analyze technologies
+                results = wappalyzer.analyze_with_categories(webpage)
+
+                # Flatten: {tech_name: {categories: [...]}} -> {tech_name: [cat_names]}
+                tech_categories = {}
+                for tech_name, info in results.items():
+                    cats = info.get("categories", [])
+                    if isinstance(cats, list):
+                        tech_categories[tech_name] = cats
+                    elif isinstance(cats, dict):
+                        tech_categories[tech_name] = list(cats.values())
+                    else:
+                        tech_categories[tech_name] = [str(cats)]
+
+                return tech_categories
+
+            except Exception as e:
+                if attempt < retries:
+                    logger.warning(
+                        f"Wappalyzer error for {url} "
+                        f"(attempt {attempt}/{retries}): {e}, retrying..."
+                    )
+                    continue
+                logger.error(f"Wappalyzer analysis failed for {url}: {e}")
+                return {}
+    # def analyze_url(self, url: str) -> Dict[str, List[str]]:
+    #     """
+    #     Analyze a URL and return detected technologies with categories.
+
+    #     Returns:
+    #         Dict like {"React": ["JavaScript frameworks"], "Node.js": ["Web servers"], ...}
+    #     """
+    #     if not self._available:
+    #         return {}
+
+    #     try:
+    #         wappalyzer = self._wappalyzer_cls.latest()
+    #         webpage = self._webpage_cls.new_from_url(url)
+    #         results = wappalyzer.analyze_with_categories(webpage)
+
+    #         # Flatten: {tech_name: {categories: [...]}} -> {tech_name: [cat_names]}
+    #         tech_categories = {}
+    #         for tech_name, info in results.items():
+    #             cats = info.get("categories", [])
+    #             if isinstance(cats, list):
+    #                 tech_categories[tech_name] = cats
+    #             elif isinstance(cats, dict):
+    #                 tech_categories[tech_name] = list(cats.values())
+    #             else:
+    #                 tech_categories[tech_name] = [str(cats)]
+
+    #         return tech_categories
+
+    #     except Exception as e:
+    #         logger.error(f"Wappalyzer analysis failed for {url}: {e}")
+    #         return {}
 
 
 # ---------------------------------------------------------------------------

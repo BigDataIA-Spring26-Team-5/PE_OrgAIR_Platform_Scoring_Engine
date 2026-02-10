@@ -1210,10 +1210,22 @@ from app.config import (
     get_company_aliases,
     get_search_name_by_official,
     get_aliases_by_official,
+    get_job_search_names,           # NEW
 )
+
+
 from app.models.signal import JobPosting
+# from app.pipelines.keywords import (
+#     AI_KEYWORDS,
+#     AI_SKILLS,
+#     AI_TECHSTACK_KEYWORDS,
+#     TECH_JOB_TITLE_KEYWORDS,
+# )
+
 from app.pipelines.keywords import (
     AI_KEYWORDS,
+    AI_KEYWORDS_STRONG,
+    AI_KEYWORDS_CONTEXTUAL,
     AI_SKILLS,
     AI_TECHSTACK_KEYWORDS,
     TECH_JOB_TITLE_KEYWORDS,
@@ -1342,7 +1354,6 @@ def step1_init(state: SignalPipelineState) -> SignalPipelineState:
     logger.info("📁 [1/4] INITIALIZING JOB COLLECTION")
     return state
 
-
 async def step2_fetch_job_postings(
     state: SignalPipelineState,
     *,
@@ -1352,7 +1363,7 @@ async def step2_fetch_job_postings(
 ) -> SignalPipelineState:
     """Scrape job postings for all companies in state."""
     logger.info("-" * 40)
-    logger.info("🔍 [2/4] FETCHING JOB POSTINGS")
+    logger.info("[2/4] FETCHING JOB POSTINGS")
 
     sites = sites or settings.JOBSPY_DEFAULT_SITES
     results_wanted = results_wanted or settings.JOBSPY_RESULTS_WANTED
@@ -1366,7 +1377,7 @@ async def step2_fetch_job_postings(
         from jobspy import scrape_jobs
     except ImportError as e:
         msg = "python-jobspy not installed. Run: pip install python-jobspy"
-        logger.error(f"   ❌ {msg}")
+        logger.error(f"   {msg}")
         state.add_error("job_fetch", msg)
         raise ImportError(msg) from e
 
@@ -1377,87 +1388,103 @@ async def step2_fetch_job_postings(
         if not company_name:
             continue
 
-        search_name = (
-            get_company_search_name(ticker)
-            or get_search_name_by_official(company_name)
-            or company_name
-        )
+        # Get ALL search names for this company (multi-name support)
+        search_names = get_job_search_names(ticker)
+        if not search_names:
+            # Fallback to single search name (backward compatible)
+            search_name = (
+                get_company_search_name(ticker)
+                or get_search_name_by_official(company_name)
+                or company_name
+            )
+            search_names = [search_name]
 
-        await asyncio.sleep(max(state.request_delay, settings.JOBSPY_REQUEST_DELAY))
+        company_postings: List[Dict[str, Any]] = []
 
-        try:
-            logger.info(f"   📥 Scraping: {company_name} (search: '{search_name}')...")
+        for search_name in search_names:
+            await asyncio.sleep(max(state.request_delay, settings.JOBSPY_REQUEST_DELAY))
 
-            jobs_df = scrape_jobs(
-                site_name=sites,
-                search_term=search_name,
-                results_wanted=results_wanted,
-                hours_old=hours_old,
-                country_indeed="USA",
-                linkedin_fetch_description=True,
+            try:
+                logger.info(f"   Scraping: {company_name} (search: '{search_name}')...")
+
+                jobs_df = scrape_jobs(
+                    site_name=sites,
+                    search_term=search_name,
+                    results_wanted=results_wanted,
+                    hours_old=hours_old,
+                    country_indeed="USA",
+                    linkedin_fetch_description=True,
+                )
+
+                filtered_count = 0
+                total_raw = 0
+
+                if jobs_df is not None and not jobs_df.empty:
+                    total_raw = len(jobs_df)
+                    for _, row in jobs_df.iterrows():
+                        job_company = (
+                            str(row.get("company", ""))
+                            if clean_nan(row.get("company"))
+                            else ""
+                        )
+                        source = str(row.get("site", "unknown"))
+
+                        if not is_company_match_fuzzy(
+                            job_company, search_name,
+                            threshold=settings.JOBSPY_FUZZY_MATCH_THRESHOLD,
+                            ticker=ticker,
+                        ):
+                            filtered_count += 1
+                            continue
+
+                        posting = JobPosting(
+                            company_id=company_id,
+                            company_name=job_company,
+                            title=str(row.get("title", "")),
+                            description=str(row.get("description", "")),
+                            location=(
+                                str(row.get("location", ""))
+                                if clean_nan(row.get("location"))
+                                else None
+                            ),
+                            posted_date=clean_nan(row.get("date_posted")),
+                            source=source,
+                            url=(
+                                str(row.get("job_url", ""))
+                                if clean_nan(row.get("job_url"))
+                                else None
+                            ),
+                        )
+                        company_postings.append(posting.model_dump())
+
+                logger.info(
+                    f"      Raw: {total_raw} | Matched: "
+                    f"{len(company_postings)} | Filtered: {filtered_count}"
+                )
+
+            except Exception as e:
+                state.add_error("job_fetch", str(e), company_id)
+                logger.error(f"      Error: {e}")
+
+        # Log combined results for multi-name searches
+        if len(search_names) > 1:
+            logger.info(
+                f"   Combined {len(search_names)} searches -> "
+                f"{len(company_postings)} total postings for {company_name}"
             )
 
-            postings: List[Dict[str, Any]] = []
-            filtered_count = 0
-            total_raw = 0
-
-            if jobs_df is not None and not jobs_df.empty:
-                total_raw = len(jobs_df)
-                for _, row in jobs_df.iterrows():
-                    job_company = (
-                        str(row.get("company", ""))
-                        if clean_nan(row.get("company"))
-                        else ""
-                    )
-                    source = str(row.get("site", "unknown"))
-
-                    if not is_company_match_fuzzy(
-                        job_company, search_name,
-                        threshold=settings.JOBSPY_FUZZY_MATCH_THRESHOLD,
-                        ticker=ticker,
-                    ):
-                        filtered_count += 1
-                        continue
-
-                    posting = JobPosting(
-                        company_id=company_id,
-                        company_name=job_company,
-                        title=str(row.get("title", "")),
-                        description=str(row.get("description", "")),
-                        location=(
-                            str(row.get("location", ""))
-                            if clean_nan(row.get("location"))
-                            else None
-                        ),
-                        posted_date=clean_nan(row.get("date_posted")),
-                        source=source,
-                        url=(
-                            str(row.get("job_url", ""))
-                            if clean_nan(row.get("job_url"))
-                            else None
-                        ),
-                    )
-                    postings.append(posting.model_dump())
-
-            state.job_postings.extend(postings)
-            state.summary["job_postings_collected"] += len(postings)
-
-            logger.info(f"      • Raw: {total_raw} | Matched: {len(postings)} | Filtered: {filtered_count}")
-
-        except Exception as e:
-            state.add_error("job_fetch", str(e), company_id)
-            logger.error(f"      ❌ Error: {e}")
+        state.job_postings.extend(company_postings)
+        state.summary["job_postings_collected"] += len(company_postings)
 
     # --- Deduplicate job postings ---
     before_dedup = len(state.job_postings)
     state.job_postings = _deduplicate_postings(state.job_postings)
     dupes_removed = before_dedup - len(state.job_postings)
 
-    logger.info(f"   ✅ Total collected: {before_dedup} job postings")
+    logger.info(f"   Total collected: {before_dedup} job postings")
     if dupes_removed > 0:
-        logger.info(f"   🧹 Removed {dupes_removed} duplicates → {len(state.job_postings)} unique postings")
+        logger.info(f"   Removed {dupes_removed} duplicates -> {len(state.job_postings)} unique postings")
     return state
-
 
 # ---------------------------------------------------------------------------
 # Classification (PDF page 14-15)
@@ -1472,9 +1499,18 @@ def _has_keyword(text: str, keyword: str) -> bool:
 def step3_classify_ai_jobs(state: SignalPipelineState) -> SignalPipelineState:
     """
     Classify each job posting as AI-related.
-    Per PDF page 15: check title + description for AI_KEYWORDS.
-    Also extract AI_SKILLS for diversity scoring.
+
+    Two-tier keyword matching to reduce false positives:
+      - STRONG keywords: any single match in title+description → AI role
+      - CONTEXTUAL keywords (e.g. "data scientist"): must appear in TITLE,
+        or appear 2+ times in description, to count. A single mention
+        in a boilerplate "about us" paragraph doesn't qualify.
     """
+    from app.pipelines.keywords import (
+        AI_KEYWORDS_STRONG, AI_KEYWORDS_CONTEXTUAL,
+        AI_SKILLS, AI_TECHSTACK_KEYWORDS,
+    )
+
     logger.info("-" * 40)
     logger.info("🤖 [3/4] CLASSIFYING AI-RELATED JOBS")
 
@@ -1482,26 +1518,33 @@ def step3_classify_ai_jobs(state: SignalPipelineState) -> SignalPipelineState:
         title = posting.get("title", "")
         desc = posting.get("description", "") or ""
 
-        # Combine title + description for keyword search
-        text = f"{title} {desc}".lower()
+        title_lower = title.lower()
+        desc_lower = desc.lower()
+        full_text = f"{title_lower} {desc_lower}"
 
-        # Find AI keywords (for is_ai_role classification)
-        ai_kw = [kw for kw in AI_KEYWORDS if _has_keyword(text, kw)]
+        # --- Strong keywords: single match anywhere is enough ---
+        strong_matches = [kw for kw in AI_KEYWORDS_STRONG if kw in full_text]
+
+        # --- Contextual keywords: must be in title OR 2+ times in description ---
+        contextual_matches = []
+        for kw in AI_KEYWORDS_CONTEXTUAL:
+            in_title = kw in title_lower
+            desc_count = desc_lower.count(kw)
+            if in_title or desc_count >= 2:
+                contextual_matches.append(kw)
+
+        ai_kw = strong_matches + contextual_matches
 
         # Find AI skills (for diversity scoring)
-        skills = [sk for sk in AI_SKILLS if _has_keyword(text, sk)]
+        skills = [sk for sk in AI_SKILLS if sk in full_text]
 
         # Find techstack keywords (kept for metadata)
-        ts_kw = [kw for kw in AI_TECHSTACK_KEYWORDS if _has_keyword(text, kw)]
+        ts_kw = [kw for kw in AI_TECHSTACK_KEYWORDS if kw in full_text]
 
         posting["ai_keywords_found"] = ai_kw
         posting["ai_skills_found"] = skills
         posting["techstack_keywords_found"] = ts_kw
-
-        # A job is AI-related if ANY AI keyword matches (PDF page 15 line 94)
         posting["is_ai_role"] = len(ai_kw) > 0
-
-        # Score for metadata (not used in final scoring formula)
         posting["ai_score"] = min(100.0, len(ai_kw) * 15.0)
 
     ai_count = sum(1 for p in state.job_postings if p.get("is_ai_role"))

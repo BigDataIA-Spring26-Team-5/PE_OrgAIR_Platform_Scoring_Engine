@@ -37,6 +37,9 @@ class SECEdgarCollector:
         "TGT": "0000027419",
         "JPM": "0000019617",
         "GS": "0000886982",
+        "NVDA": "0001045810",
+        "GE": "0000040545",
+        "DG": "0000029534",
     }
     
     # Only the primary filing types (no amendments or supplemental)
@@ -87,6 +90,7 @@ class SECEdgarCollector:
         
         # Try to look up CIK from SEC
         logger.info(f"  🔍 Looking up CIK for {ticker}")
+        logger.info(f"  CIK lookup: {ticker} → {cik}") 
         url = f"{self.SUBMISSIONS_URL}/CIK{ticker.upper()}.json"
         response = self._make_request(url)
         if response:
