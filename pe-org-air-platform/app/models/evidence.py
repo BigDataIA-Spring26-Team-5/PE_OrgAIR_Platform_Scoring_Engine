@@ -1,12 +1,10 @@
+# app/models/evidence.py
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 from datetime import datetime, date
 from enum import Enum
 
-
-
 # Document Summary (replaces per-document listing)
-
 
 class DocumentSummary(BaseModel):
     """Aggregated document stats for a company — no individual doc rows."""

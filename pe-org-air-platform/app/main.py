@@ -15,6 +15,9 @@ from app.routers.documents import router as documents_router
 # from app.routers.pdf_parser import router as pdf_parser_router
 from app.routers.signals import router as signals_router
 from app.routers.evidence import router as evidence_router
+from app.routers.scoring import router as scoring_router
+from fastapi.middleware.cors import CORSMiddleware
+
 
 load_dotenv()
 
@@ -30,10 +33,13 @@ app = FastAPI(
     openapi_url="/openapi.json",
 )
 
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
 # REGISTER EXCEPTION HANDLERS
 app.add_exception_handler(RequestValidationError, validation_exception_handler)
 
 # REGISTER ROUTERS
+app.include_router(scoring_router)
 app.include_router(health_router)
 app.include_router(industries_router)
 app.include_router(companies_router)
