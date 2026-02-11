@@ -506,15 +506,19 @@ async def generate_portfolio_report():
 
     try:
         from app.repositories.scoring_repository import get_scoring_repository
+        from app.repositories.signal_repository import get_signal_repository
         from app.services.report_generator import generate_portfolio_summary
 
         repo = get_scoring_repository()
+        signal_repo = get_signal_repository()
+
         all_scores = repo.get_all_dimension_scores()
+        all_summaries = signal_repo.get_all_summaries()
 
         if not all_scores:
             raise HTTPException(status_code=404, detail="No scoring data. Run POST /api/v1/scoring/all first.")
 
-        md = generate_portfolio_summary(all_scores)
+        md = generate_portfolio_summary(all_scores, all_summaries)
 
         return StreamingResponse(
             io.BytesIO(md.encode("utf-8")),
@@ -547,9 +551,12 @@ async def generate_company_report_endpoint(ticker: str):
 
     try:
         from app.repositories.scoring_repository import get_scoring_repository
+        from app.repositories.signal_repository import get_signal_repository
         from app.services.report_generator import generate_company_report
 
         repo = get_scoring_repository()
+        signal_repo = get_signal_repository()
+
         matrix = repo.get_mapping_matrix(ticker)
         dimensions = repo.get_dimension_scores(ticker)
 
@@ -559,10 +566,12 @@ async def generate_company_report_endpoint(ticker: str):
                 detail=f"No scoring data for {ticker}. Run POST /api/v1/scoring/{ticker} first."
             )
 
+        signal_summary = signal_repo.get_summary_by_ticker(ticker)
+
         clean_matrix = [_serialize_row(r) for r in matrix]
         clean_dims = [_serialize_row(r) for r in dimensions]
 
-        md = generate_company_report(ticker, clean_matrix, clean_dims)
+        md = generate_company_report(ticker, clean_matrix, clean_dims, signal_summary)
 
         return StreamingResponse(
             io.BytesIO(md.encode("utf-8")),
