@@ -11,6 +11,8 @@ class SignalCategory(str, Enum):
     INNOVATION_ACTIVITY = "innovation_activity"
     DIGITAL_PRESENCE = "digital_presence"
     LEADERSHIP_SIGNALS = "leadership_signals"
+    GLASSDOOR_CULTURE = "glassdoor_culture"        # NEW
+    BOARD_GOVERNANCE = "board_governance"            # NEW
 
 
 class SignalSource(str, Enum):
@@ -29,7 +31,8 @@ class SignalSource(str, Enum):
     SEC_FILING = "sec_filing" 
     WAPPALYZER = "wappalyzer"
     BUILTWITH_WAPPALYZER = "builtwith_wappalyzer"
-
+    GLASSDOOR = "glassdoor"              # NEW
+    BOARD_PROXY = "board_proxy"          # NEW
 
 class ExternalSignal(BaseModel):
     """A single external signal observation."""
