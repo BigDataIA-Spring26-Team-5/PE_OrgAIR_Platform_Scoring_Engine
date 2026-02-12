@@ -29,7 +29,7 @@ class TalentConcentrationCalculator:
         unique_skills: Set[str] = set()
 
         for posting in postings:
-            if not posting.get("is_ai_job", False):
+            if not posting.get("is_ai_role", False):
                 continue
             total_ai_jobs += 1
             title_lower = posting.get("title", "").lower()
