@@ -1,0 +1,145 @@
+{
+  "company_id": "8cb65ec5-9d55-4b35-b2eb-f2516abe7281",
+  "ticker": "JPM",
+  "has_tech_committee": true,
+  "has_ai_expertise": true,
+  "has_data_officer": true,
+  "has_risk_tech_oversight": true,
+  "has_ai_in_strategy": false,
+  "tech_expertise_count": 11,
+  "independent_ratio": 0.9167,
+  "governance_score": 90.0,
+  "confidence": 0.95,
+  "ai_experts": [
+    "Stephen B. Burke",
+    "Linda B. Bammann",
+    "Michele G. Buck",
+    "Todd A. Combs",
+    "Alicia Boler Davis",
+    "Alex Gorsky",
+    "Mellody Hobson",
+    "Phebe N. Novakovic",
+    "Virginia M. Rometty",
+    "Brad D. Smith",
+    "Mark A. Weinberger"
+  ],
+  "relevant_committees": [
+    "Audit Committee",
+    "Corporate governance and Audit Committee"
+  ],
+  "board_members": [
+    {
+      "name": "Stephen B. Burke",
+      "title": "Lead Independent Director",
+      "is_independent": true,
+      "tenure_years": 22,
+      "committees": [
+        "Compensation & Management Development (Chair)",
+        "Corporate Governance & Nominating"
+      ]
+    },
+    {
+      "name": "Linda B. Bammann",
+      "title": "Retired Deputy Head of Risk Management of JPMorgan Chase & Co.3",
+      "is_independent": true,
+      "tenure_years": 13,
+      "committees": [
+        "Risk (Chair)",
+        "Compensation & Management Development"
+      ]
+    },
+    {
+      "name": "Michele G. Buck",
+      "title": "Chairman, President and Chief Executive Officer of The Hershey Company",
+      "is_independent": true,
+      "tenure_years": 1,
+      "committees": [
+        "Audit"
+      ]
+    },
+    {
+      "name": "Todd A. Combs",
+      "title": "Chairman, President and Chief Executive Officer of GEICO and Investment Officer at Berkshire Hathawa",
+      "is_independent": true,
+      "tenure_years": 10,
+      "committees": [
+        "Corporate Governance &Nominating (Chair)",
+        "Compensation &Management Development"
+      ]
+    },
+    {
+      "name": "Alicia Boler Davis",
+      "title": "Chief Executive Officer of Alto Pharmacy, LLC",
+      "is_independent": true,
+      "tenure_years": 3,
+      "committees": [
+        "Risk"
+      ]
+    },
+    {
+      "name": "James Dimon",
+      "title": "Chairman and CEO",
+      "is_independent": false,
+      "tenure_years": 22,
+      "committees": []
+    },
+    {
+      "name": "Alex Gorsky",
+      "title": "Retired Chairman and Chief Executive Officer of Johnson & Johnson",
+      "is_independent": true,
+      "tenure_years": 4,
+      "committees": [
+        "Audit",
+        "Public Responsibility"
+      ]
+    },
+    {
+      "name": "Mellody Hobson",
+      "title": "Co-Chief Executive Officer and President of Ariel Investments, LLC",
+      "is_independent": true,
+      "tenure_years": 8,
+      "committees": [
+        "Public Responsibility(Chair)",
+        "Risk"
+      ]
+    },
+    {
+      "name": "Phebe N. Novakovic",
+      "title": "Chairman and Chief Executive Officer of General Dynamics Corporation",
+      "is_independent": true,
+      "tenure_years": 6,
+      "committees": [
+        "Audit",
+        "Public Responsibility"
+      ]
+    },
+    {
+      "name": "Virginia M. Rometty",
+      "title": "Retired Executive Chairman, President and Chief Executive Officer of International Business Machines",
+      "is_independent": true,
+      "tenure_years": 6,
+      "committees": [
+        "Compensation & Management Development",
+        "Corporate Governance & Nominating"
+      ]
+    },
+    {
+      "name": "Brad D. Smith",
+      "title": "President of Marshall University and Retired Executive Chairman, President and Chief Executive Offic",
+      "is_independent": true,
+      "tenure_years": 1,
+      "committees": [
+        "Risk"
+      ]
+    },
+    {
+      "name": "Mark A. Weinberger",
+      "title": "Retired Global Chairman and Chief Executive Officer of Ernst & Young LLP",
+      "is_independent": true,
+      "tenure_years": 2,
+      "committees": [
+        "Audit (Chair)"
+      ]
+    }
+  ]
+}

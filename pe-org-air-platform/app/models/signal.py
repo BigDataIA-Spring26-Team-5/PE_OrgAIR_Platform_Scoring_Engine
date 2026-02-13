@@ -31,7 +31,7 @@ class SignalSource(str, Enum):
     SEC_FILING = "sec_filing" 
     WAPPALYZER = "wappalyzer"
     BUILTWITH_WAPPALYZER = "builtwith_wappalyzer"
-    GLASSDOOR = "glassdoor"              # NEW
+    # GLASSDOOR = "glassdoor"              # NEW
     BOARD_PROXY = "board_proxy"          # NEW
 
 class ExternalSignal(BaseModel):
