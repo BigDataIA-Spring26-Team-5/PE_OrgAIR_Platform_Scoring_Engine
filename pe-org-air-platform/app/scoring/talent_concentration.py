@@ -4,7 +4,7 @@ import logging
 import re
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import List, Optional, Set
+from typing import List, Optional, Set  # Optional kept for load_glassdoor_reviews()
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +140,39 @@ class TalentConcentrationCalculator:
         return reviews
 
     # ------------------------------------------------------------------ #
+    # Individual-mention counter (key-person risk signal)                 #
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def count_individual_mentions(reviews: List[GlassdoorReview]) -> tuple:
+        """Return (individual_mention_count, total_review_count).
+
+        A review counts as an individual mention if it contains an executive
+        title immediately followed by a capitalized name word, e.g. 'CEO Huang'
+        or 'President Jensen'.  This is a proxy for key-person dependency risk:
+        the more reviews name a specific leader, the more concentrated AI
+        capability is perceived to be in that individual.
+
+        Uses whole-word matching to avoid false positives on substrings.
+        """
+        _PATTERN = re.compile(
+            r'\b(?:CEO|CTO|CFO|COO|CIO|CDO|CAIO|President|Founder|Chairman)'
+            r'\s+[A-Z][a-z]+\b'
+        )
+        mention_count = 0
+        for review in reviews:
+            text = " ".join(filter(None, [
+                review.pros,
+                review.cons,
+                review.advice_to_management or "",
+                review.title,
+                review.job_title,
+            ]))
+            if _PATTERN.search(text):
+                mention_count += 1
+        return mention_count, len(reviews)
+
+    # ------------------------------------------------------------------ #
     # AI-mention counter                                                   #
     # ------------------------------------------------------------------ #
 
@@ -185,17 +218,20 @@ class TalentConcentrationCalculator:
     def calculate_tc(
         self,
         job_analysis: JobAnalysis,
-        glassdoor_reviews: Optional[List[GlassdoorReview]] = None,
+        glassdoor_individual_mentions: int = 0,
+        glassdoor_review_count: int = 1,
     ) -> Decimal:
         """Calculate Talent Concentration (TC) score as a Decimal in [0, 1].
 
-        Formula (weights unchanged from original):
+        Formula (PDF Task 5.0e spec):
             TC = 0.40 × leadership_ratio      (senior AI jobs / total AI jobs)
                + 0.30 × team_size_factor      (inverse-sqrt of team size)
                + 0.20 × skill_concentration   (1 - unique_skills / 15)
-               + 0.10 × individual_factor     (fraction of reviews mentioning AI)
+               + 0.10 × individual_factor     (fraction of reviews naming a specific person)
 
         individual_factor falls back to 0.5 (neutral) when no reviews are available.
+        Use count_individual_mentions() to obtain glassdoor_individual_mentions and
+        glassdoor_review_count before calling this method.
         """
         total = job_analysis.total_ai_jobs
         senior = job_analysis.senior_ai_jobs
@@ -204,9 +240,8 @@ class TalentConcentrationCalculator:
         team_size_factor = min(1.0, 1.0 / (total ** 0.5 + 0.1))
         skill_concentration = max(0.0, 1.0 - len(job_analysis.unique_skills) / 15)
 
-        if glassdoor_reviews:
-            ai_mentions, total_reviews = self.count_ai_mentions(glassdoor_reviews)
-            individual_factor = ai_mentions / total_reviews if total_reviews > 0 else 0.5
+        if glassdoor_review_count > 0:
+            individual_factor = glassdoor_individual_mentions / glassdoor_review_count
         else:
             individual_factor = 0.5
 
