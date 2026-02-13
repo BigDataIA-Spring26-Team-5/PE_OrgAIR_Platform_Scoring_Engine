@@ -17,6 +17,7 @@ from app.routers.signals import router as signals_router
 from app.routers.evidence import router as evidence_router
 from app.routers.scoring import router as scoring_router
 from fastapi.middleware.cors import CORSMiddleware
+from app.routers.board_governance import router as board_governance_router
 
 
 load_dotenv()
@@ -39,6 +40,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 app.add_exception_handler(RequestValidationError, validation_exception_handler)
 
 # REGISTER ROUTERS
+app.include_router(board_governance_router)
 app.include_router(scoring_router)
 app.include_router(health_router)
 app.include_router(industries_router)

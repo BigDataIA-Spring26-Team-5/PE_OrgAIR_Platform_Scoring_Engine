@@ -1,0 +1,180 @@
+{
+  "company_id": "993638d1-4b41-4b85-accc-4cbfb223262c",
+  "ticker": "GE",
+  "has_tech_committee": true,
+  "has_ai_expertise": true,
+  "has_data_officer": true,
+  "has_risk_tech_oversight": false,
+  "has_ai_in_strategy": false,
+  "tech_expertise_count": 13,
+  "independent_ratio": 0.6429,
+  "governance_score": 80.0,
+  "confidence": 0.95,
+  "ai_experts": [
+    "Thomas Horton",
+    "Isabella Goren",
+    "Stephen Angel",
+    "Catherine Lesjak",
+    "S\u00e9bastien Bazin",
+    "Margaret Billson",
+    "Thomas Enders",
+    "Edward Garden",
+    "Darren Mc Dew",
+    "Rahul Ghai",
+    "Russell Stokes",
+    "Christian Meisner",
+    "John Phillips, III"
+  ],
+  "relevant_committees": [
+    "Audit Committee"
+  ],
+  "board_members": [
+    {
+      "name": "H. Lawrence Culp, Jr",
+      "title": "Chairman",
+      "is_independent": false,
+      "tenure_years": 8,
+      "committees": [
+        "Technology Committee",
+        "Ai Committee"
+      ]
+    },
+    {
+      "name": "Thomas Horton",
+      "title": "Chairman",
+      "is_independent": true,
+      "tenure_years": 8,
+      "committees": [
+        "Governance Committee",
+        "Ai Committee"
+      ]
+    },
+    {
+      "name": "Isabella Goren",
+      "title": "Director",
+      "is_independent": true,
+      "tenure_years": 4,
+      "committees": [
+        "Audit Committee",
+        "Ai Committee"
+      ]
+    },
+    {
+      "name": "Stephen Angel",
+      "title": "Chairman",
+      "is_independent": true,
+      "tenure_years": 4,
+      "committees": [
+        "Compensation Committee",
+        "Ai Committee"
+      ]
+    },
+    {
+      "name": "Catherine Lesjak",
+      "title": "Director",
+      "is_independent": true,
+      "tenure_years": 7,
+      "committees": [
+        "Audit Committee",
+        "Governance Committee",
+        "Technology Committee",
+        "Ai Committee"
+      ]
+    },
+    {
+      "name": "S\u00e9bastien Bazin",
+      "title": "Chairman",
+      "is_independent": true,
+      "tenure_years": 10,
+      "committees": [
+        "Compensation Committee",
+        "Governance Committee",
+        "Ai Committee"
+      ]
+    },
+    {
+      "name": "Margaret Billson",
+      "title": "Director",
+      "is_independent": true,
+      "tenure_years": 3,
+      "committees": [
+        "Audit Committee",
+        "Ai Committee"
+      ]
+    },
+    {
+      "name": "Thomas Enders",
+      "title": "Director",
+      "is_independent": true,
+      "tenure_years": 3,
+      "committees": [
+        "Compensation Committee",
+        "Ai Committee"
+      ]
+    },
+    {
+      "name": "Edward Garden",
+      "title": "Chairman",
+      "is_independent": true,
+      "tenure_years": 9,
+      "committees": [
+        "Audit Committee",
+        "Compensation Committee",
+        "Ai Committee"
+      ]
+    },
+    {
+      "name": "Darren Mc Dew",
+      "title": "Director",
+      "is_independent": true,
+      "tenure_years": 3,
+      "committees": [
+        "Audit Committee",
+        "Governance Committee",
+        "Ai Committee"
+      ]
+    },
+    {
+      "name": "Rahul Ghai",
+      "title": "CFO",
+      "is_independent": false,
+      "tenure_years": 0,
+      "committees": [
+        "Audit Committee",
+        "Compensation Committee",
+        "Ai Committee"
+      ]
+    },
+    {
+      "name": "Russell Stokes",
+      "title": "President and CEO",
+      "is_independent": false,
+      "tenure_years": 0,
+      "committees": [
+        "Ai Committee",
+        "Supply Chain Committee"
+      ]
+    },
+    {
+      "name": "Christian Meisner",
+      "title": "Director",
+      "is_independent": false,
+      "tenure_years": 0,
+      "committees": [
+        "Compensation Committee",
+        "Ai Committee"
+      ]
+    },
+    {
+      "name": "John Phillips, III",
+      "title": "Director",
+      "is_independent": false,
+      "tenure_years": 0,
+      "committees": [
+        "Governance Committee",
+        "Risk Committee",
+        "Ai Committee"
+      ]
+    }
+  ]
+}
