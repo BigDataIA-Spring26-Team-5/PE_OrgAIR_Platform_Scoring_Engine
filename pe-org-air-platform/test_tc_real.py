@@ -174,7 +174,8 @@ def main() -> None:
 
         job_analysis = calc.analyze_job_postings(jobs)
         ai_mentions, total_reviews = calc.count_ai_mentions(reviews)
-        tc: Decimal = calc.calculate_tc(job_analysis, reviews)
+        indiv_mentions, _ = calc.count_individual_mentions(reviews)
+        tc: Decimal = calc.calculate_tc(job_analysis, indiv_mentions, total_reviews)
 
         rows.append((
             ticker,
