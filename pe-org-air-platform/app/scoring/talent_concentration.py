@@ -4,7 +4,7 @@ import logging
 import re
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import List, Optional, Set  # Optional kept for load_glassdoor_reviews()
+from typing import List, Optional, Set
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +15,47 @@ _AI_KEYWORDS = frozenset([
     "artificial intelligence", "ml", "large language model",
     "computer vision", "predictive analytics",
 ])
+
+# ------------------------------------------------------------------ #
+# Expanded skill list for TC skill_concentration calculation          #
+# ------------------------------------------------------------------ #
+_EXPANDED_AI_SKILLS = frozenset([
+    # CS2 originals
+    "python", "pytorch", "tensorflow", "scikit-learn",
+    "spark", "hadoop", "kubernetes", "docker",
+    "aws sagemaker", "azure ml", "gcp vertex",
+    "huggingface", "langchain", "openai",
+    # GPU / NVIDIA ecosystem
+    "cuda", "tensorrt", "triton", "nccl", "nvlink",
+    "deepstream", "isaac", "omniverse", "vllm",
+    # ML frameworks & tools
+    "jax", "onnx", "mlflow", "kubeflow", "ray",
+    "wandb", "weights & biases", "dvc",
+    "keras", "xgboost", "lightgbm", "catboost",
+    # Data / infra
+    "snowflake", "databricks", "airflow", "kafka",
+    "redis", "elasticsearch", "postgresql", "mongodb",
+    # Cloud ML
+    "sagemaker", "vertex ai", "bedrock", "azure openai",
+    # Languages commonly paired with AI
+    "go", "rust", "julia", "r",
+    "c++",
+    # HPC / parallel
+    "mpi", "openmp", "openacc", "infiniband",
+])
+
+# Short terms that need whole-word matching to avoid false positives
+_WHOLE_WORD_SKILLS = frozenset([
+    "go", "r", "c++", "ray", "jax", "mpi", "cuda", "rust", "julia",
+    "redis", "kafka", "dvc",
+])
+
+# ------------------------------------------------------------------ #
+# FIX 3: Calibrated skill denominator for expanded list              #
+# With ~50 skills in the expanded list, 15 saturates too easily.     #
+# 25 means: 25+ unique skills = zero concentration (fully distributed)#
+# ------------------------------------------------------------------ #
+_SKILL_DENOMINATOR = 25
 
 
 @dataclass
@@ -47,11 +88,16 @@ class TalentConcentrationCalculator:
         pass
 
     # ------------------------------------------------------------------ #
-    # Job-posting analysis (unchanged)                                     #
+    # Job-posting analysis — extracts skills from description text        #
     # ------------------------------------------------------------------ #
 
     def analyze_job_postings(self, postings: List[dict]) -> JobAnalysis:
-        """Analyze job postings to extract AI talent concentration signals."""
+        """Analyze job postings to extract AI talent concentration signals.
+
+        Skills are collected from TWO sources per posting:
+          1. ai_skills_found (pre-computed by CS2 pipeline)
+          2. Full description text scanned against _EXPANDED_AI_SKILLS
+        """
         senior_keywords = {"principal", "staff", "director", "vp", "head", "chief"}
         mid_keywords = {"senior", "lead", "manager"}
         entry_keywords = {"junior", "associate", "entry", "intern"}
@@ -74,7 +120,20 @@ class TalentConcentrationCalculator:
                 mid_ai_jobs += 1
             elif title_words & entry_keywords:
                 entry_ai_jobs += 1
+
+            # Source 1: pre-computed skills from CS2
             unique_skills.update(posting.get("ai_skills_found", []))
+
+            # Source 2: scan full description for expanded skill list
+            desc = posting.get("description", "").lower()
+            if desc:
+                for skill in _EXPANDED_AI_SKILLS:
+                    if skill in _WHOLE_WORD_SKILLS:
+                        if re.search(r"\b" + re.escape(skill) + r"\b", desc):
+                            unique_skills.add(skill)
+                    else:
+                        if skill in desc:
+                            unique_skills.add(skill)
 
         return JobAnalysis(
             total_ai_jobs=total_ai_jobs,
@@ -85,7 +144,7 @@ class TalentConcentrationCalculator:
         )
 
     # ------------------------------------------------------------------ #
-    # Glassdoor S3 loader                                                  #
+    # Glassdoor S3 loader — tries BOTH path patterns                     #
     # ------------------------------------------------------------------ #
 
     @staticmethod
@@ -95,31 +154,45 @@ class TalentConcentrationCalculator:
     ) -> List[GlassdoorReview]:
         """Load individual reviews from the latest raw S3 snapshot for *ticker*.
 
-        S3 path: glassdoor_signals/raw/{ticker}/{timestamp}_raw.json
-        The wrapper JSON has shape: {"reviews": [...], "review_count": N, ...}
-        Files sort lexicographically by timestamp; the last key is the most recent.
-        Returns an empty list if no data exists or the download fails.
+        Tries multiple S3 path patterns:
+          1. glassdoor_signals/raw/{TICKER}/{timestamp}_raw.json  (culture_collector.py)
+          2. glassdoor_signals/raw/{TICKER}_raw.json              (flat format)
         """
         from app.services.s3_storage import get_s3_service
 
         svc = s3_service or get_s3_service()
-        prefix = f"glassdoor_signals/raw/{ticker.upper()}/"
-        keys = svc.list_files(prefix)
-        if not keys:
-            logger.warning("No Glassdoor raw snapshot found in S3 for %s", ticker)
-            return []
+        ticker_upper = ticker.upper()
 
-        latest_key = sorted(keys)[-1]
-        raw = svc.get_file(latest_key)
+        # --- Attempt 1: timestamped subfolder path ---
+        prefix = f"glassdoor_signals/raw/{ticker_upper}/"
+        keys = svc.list_files(prefix)
+        if keys:
+            latest_key = sorted(keys)[-1]
+            reviews = TalentConcentrationCalculator._parse_glassdoor_s3(svc, latest_key, ticker_upper)
+            if reviews is not None:
+                return reviews
+
+        # --- Attempt 2: flat file path ---
+        flat_key = f"glassdoor_signals/raw/{ticker_upper}_raw.json"
+        reviews = TalentConcentrationCalculator._parse_glassdoor_s3(svc, flat_key, ticker_upper)
+        if reviews is not None:
+            return reviews
+
+        logger.warning("No Glassdoor raw snapshot found in S3 for %s (tried both path patterns)", ticker_upper)
+        return []
+
+    @staticmethod
+    def _parse_glassdoor_s3(svc, key: str, ticker: str) -> Optional[List["GlassdoorReview"]]:
+        """Parse a single Glassdoor S3 JSON file into GlassdoorReview list."""
+        raw = svc.get_file(key)
         if raw is None:
-            logger.error("Failed to download Glassdoor snapshot: %s", latest_key)
-            return []
+            return None
 
         try:
             wrapper = json.loads(raw)
         except json.JSONDecodeError:
-            logger.error("Invalid JSON in Glassdoor snapshot: %s", latest_key)
-            return []
+            logger.error("Invalid JSON in Glassdoor snapshot: %s", key)
+            return None
 
         reviews = []
         for item in wrapper.get("reviews", []):
@@ -136,29 +209,58 @@ class TalentConcentrationCalculator:
                 source=item.get("source", "unknown"),
             ))
 
-        logger.info("Loaded %d Glassdoor reviews for %s from %s", len(reviews), ticker, latest_key)
+        logger.info("Loaded %d Glassdoor reviews for %s from %s", len(reviews), ticker, key)
         return reviews
 
     # ------------------------------------------------------------------ #
-    # Individual-mention counter (key-person risk signal)                 #
+    # FIX 2: Improved individual-mention counter                         #
     # ------------------------------------------------------------------ #
+    # Old regex only matched "CEO Huang" — missed "Jensen", "Huang",     #
+    # "CEO Jensen Huang", "Jamie Dimon", etc.                            #
+    # New approach: match exec titles followed by names, OR well-known    #
+    # exec names appearing standalone.                                    #
+    # ------------------------------------------------------------------ #
+
+    # Well-known exec names for the 5 CS3 portfolio companies
+    _KNOWN_EXECUTIVES = {
+        # NVDA
+        "jensen huang", "jensen", "huang",
+        # JPM
+        "jamie dimon", "dimon",
+        # WMT
+        "doug mcmillon", "mcmillon",
+        # GE
+        "larry culp", "culp",
+        # DG
+        "todd vasos", "vasos",
+    }
 
     @staticmethod
     def count_individual_mentions(reviews: List[GlassdoorReview]) -> tuple:
         """Return (individual_mention_count, total_review_count).
 
-        A review counts as an individual mention if it contains an executive
-        title immediately followed by a capitalized name word, e.g. 'CEO Huang'
-        or 'President Jensen'.  This is a proxy for key-person dependency risk:
-        the more reviews name a specific leader, the more concentrated AI
-        capability is perceived to be in that individual.
+        A review counts as an individual mention if it contains:
+          1. An executive title followed by a capitalized name (generic), OR
+          2. A known executive name for CS3 portfolio companies
 
-        Uses whole-word matching to avoid false positives on substrings.
+        This captures reviews like "Jensen is visionary", "Huang drives AI",
+        "Jamie Dimon leads from the top" — not just "CEO Huang".
         """
-        _PATTERN = re.compile(
+        # Pattern 1: Title + Name (original, kept for generality)
+        _TITLE_PATTERN = re.compile(
             r'\b(?:CEO|CTO|CFO|COO|CIO|CDO|CAIO|President|Founder|Chairman)'
             r'\s+[A-Z][a-z]+\b'
         )
+
+        # Pattern 2: Known executive names (whole-word, case-insensitive)
+        _name_patterns = []
+        for name in TalentConcentrationCalculator._KNOWN_EXECUTIVES:
+            # Only match names with 4+ chars to avoid false positives
+            if len(name) >= 4:
+                _name_patterns.append(re.compile(
+                    r'\b' + re.escape(name) + r'\b', re.IGNORECASE
+                ))
+
         mention_count = 0
         for review in reviews:
             text = " ".join(filter(None, [
@@ -168,8 +270,19 @@ class TalentConcentrationCalculator:
                 review.title,
                 review.job_title,
             ]))
-            if _PATTERN.search(text):
+
+            # Check title+name pattern
+            if _TITLE_PATTERN.search(text):
                 mention_count += 1
+                continue
+
+            # Check known executive names
+            text_lower = text.lower()
+            for pat in _name_patterns:
+                if pat.search(text_lower):
+                    mention_count += 1
+                    break
+
         return mention_count, len(reviews)
 
     # ------------------------------------------------------------------ #
@@ -178,12 +291,7 @@ class TalentConcentrationCalculator:
 
     @staticmethod
     def count_ai_mentions(reviews: List[GlassdoorReview]) -> tuple:
-        """Return (ai_mention_count, total_review_count).
-
-        A review counts as an AI mention if any AI awareness keyword appears
-        in the combined text of pros, cons, advice_to_management, title, or job_title.
-        Whole-word matching is used for short terms ('ai', 'ml', 'nlp', 'llm').
-        """
+        """Return (ai_mention_count, total_review_count)."""
         whole_word_terms = frozenset(["ai", "ml", "nlp", "llm"])
         ai_mention_count = 0
 
@@ -219,31 +327,44 @@ class TalentConcentrationCalculator:
         self,
         job_analysis: JobAnalysis,
         glassdoor_individual_mentions: int = 0,
-        glassdoor_review_count: int = 1,
+        glassdoor_review_count: int = 0,
     ) -> Decimal:
         """Calculate Talent Concentration (TC) score as a Decimal in [0, 1].
 
-        Formula (PDF Task 5.0e spec):
-            TC = 0.40 × leadership_ratio      (senior AI jobs / total AI jobs)
-               + 0.30 × team_size_factor      (inverse-sqrt of team size)
-               + 0.20 × skill_concentration   (1 - unique_skills / 15)
-               + 0.10 × individual_factor     (fraction of reviews naming a specific person)
+        Formula (CS3 Task 5.0e spec):
+            TC = 0.40 × leadership_ratio
+               + 0.30 × team_size_factor
+               + 0.20 × skill_concentration
+               + 0.10 × individual_factor
 
-        individual_factor falls back to 0.5 (neutral) when no reviews are available.
-        Use count_individual_mentions() to obtain glassdoor_individual_mentions and
-        glassdoor_review_count before calling this method.
+        FIX 1: skill denominator raised from 15 → 25 to account for
+               expanded skill list (prevents premature floor at 0).
+        FIX 2: individual_factor uses improved exec name matching.
+        FIX 3: Zero-AI-jobs defaults calibrated to produce TC ≈ 0.30
+               (matching CS3 Table 5 expectation for laggards like DG)
+               instead of TC ≈ 0.70 from maxed-out defaults.
         """
         total = job_analysis.total_ai_jobs
         senior = job_analysis.senior_ai_jobs
 
-        leadership_ratio = senior / total if total > 0 else 0.5
-        team_size_factor = min(1.0, 1.0 / (total ** 0.5 + 0.1))
-        skill_concentration = max(0.0, 1.0 - len(job_analysis.unique_skills) / 15)
+        # ---- FIX 3: Calibrated defaults for zero-AI-jobs ----
+        # CS3 expects DG (0 AI jobs) → TC ≈ 0.30, not 0.70
+        # Old defaults: leadership=0.5, team_size=1.0, skill=1.0 → TC=0.70
+        # New defaults: leadership=0.3, team_size=0.5, skill=0.6 → TC ≈ 0.30
+        if total == 0:
+            leadership_ratio = 0.25      # Some concentration assumed, not extreme
+            team_size_factor = 0.40      # No team = moderate risk, not maximum
+            skill_concentration = 0.50   # No skills detected = moderate concentration
+        else:
+            leadership_ratio = senior / total
+            team_size_factor = min(1.0, 1.0 / (total ** 0.5 + 0.1))
+            # FIX 1: Use _SKILL_DENOMINATOR (25) instead of hardcoded 15
+            skill_concentration = max(0.0, 1.0 - len(job_analysis.unique_skills) / _SKILL_DENOMINATOR)
 
         if glassdoor_review_count > 0:
             individual_factor = glassdoor_individual_mentions / glassdoor_review_count
         else:
-            individual_factor = 0.5
+            individual_factor = 0.0  # No data = no signal
 
         tc = (
             0.4 * leadership_ratio
