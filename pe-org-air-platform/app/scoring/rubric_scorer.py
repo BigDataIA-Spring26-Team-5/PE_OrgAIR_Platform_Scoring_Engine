@@ -1,680 +1,3 @@
-# """
-# Rubric-Based Scorer — Task 5.0b (CS3)
-# app/scoring/rubric_scorer.py
-
-# Converts evidence text + quantitative metrics into rubric-aligned 0-100 scores
-# for each of the 7 V^R dimensions.
-
-# Each dimension has a 5-level rubric (CS3 p.11-13):
-#   Level 5: 80-100 (Excellent)
-#   Level 4: 60-79  (Good)
-#   Level 3: 40-59  (Adequate)
-#   Level 2: 20-39  (Developing)
-#   Level 1:  0-19  (Nascent)
-
-# Scoring algorithm:
-#   1. Normalize evidence text (lowercase)
-#   2. For each level (5 down to 1):
-#      a. Count keyword matches
-#      b. Check quantitative threshold
-#      c. If criteria met → interpolate score within that level's range
-#   3. Use keyword density to interpolate within range
-
-# Usage:
-#     scorer = RubricScorer()
-#     result = scorer.score_dimension(
-#         dimension="talent_skills",
-#         evidence_text="large AI team with 25 ml engineers...",
-#         quantitative_metrics={"ai_job_ratio": 0.42, "patent_count": 15}
-#     )
-#     # result.score = Decimal("84.50"), result.level = ScoreLevel.LEVEL_5
-# """
-
-# from dataclasses import dataclass
-# from typing import Dict, List, Tuple, Optional
-# from enum import Enum
-# from decimal import Decimal, ROUND_HALF_UP
-# import re
-
-
-# # ---------------------------------------------------------------------------
-# # Score Levels
-# # ---------------------------------------------------------------------------
-
-# class ScoreLevel(Enum):
-#     """5-level scoring rubric."""
-#     LEVEL_5 = (80, 100, "Excellent")
-#     LEVEL_4 = (60, 79, "Good")
-#     LEVEL_3 = (40, 59, "Adequate")
-#     LEVEL_2 = (20, 39, "Developing")
-#     LEVEL_1 = (0, 19, "Nascent")
-
-#     @property
-#     def min_score(self) -> int:
-#         return self.value[0]
-
-#     @property
-#     def max_score(self) -> int:
-#         return self.value[1]
-
-#     @property
-#     def label(self) -> str:
-#         return self.value[2]
-
-
-# # ---------------------------------------------------------------------------
-# # Data classes
-# # ---------------------------------------------------------------------------
-
-# @dataclass
-# class RubricCriteria:
-#     """Criteria for a single rubric level."""
-#     level: ScoreLevel
-#     keywords: List[str]
-#     min_keyword_matches: int
-#     quantitative_threshold: float   # e.g., AI job ratio > 0.3
-
-
-# @dataclass
-# class RubricResult:
-#     """Result of rubric scoring."""
-#     dimension: str
-#     level: ScoreLevel
-#     score: Decimal
-#     matched_keywords: List[str]
-#     keyword_match_count: int
-#     confidence: Decimal
-#     rationale: str
-
-
-# # ---------------------------------------------------------------------------
-# # THE 7 DIMENSION RUBRICS (CS3 p.11-13)
-# #
-# # Uses existing enum names: data_infrastructure, ai_governance,
-# # technology_stack, talent_skills, leadership_vision,
-# # use_case_portfolio, culture_change
-# # ---------------------------------------------------------------------------
-
-# DIMENSION_RUBRICS: Dict[str, Dict[ScoreLevel, RubricCriteria]] = {
-
-#     # ── Data Infrastructure ───────────────────────────────────────────
-#     "data_infrastructure": {
-#         ScoreLevel.LEVEL_5: RubricCriteria(
-#             level=ScoreLevel.LEVEL_5,
-#             keywords=[
-#                 "snowflake", "databricks", "lakehouse", "real-time",
-#                 "data quality", "api-first", "data mesh", "streaming",
-#                 "cloud platform", "data lake", "delta lake",
-#             ],
-#             min_keyword_matches=3,
-#             quantitative_threshold=0.40,
-#         ),
-#         ScoreLevel.LEVEL_4: RubricCriteria(
-#             level=ScoreLevel.LEVEL_4,
-#             keywords=[
-#                 "azure", "aws", "warehouse", "etl", "data catalog",
-#                 "hybrid cloud", "batch pipeline", "redshift", "bigquery",
-#                 "data governance",
-#             ],
-#             min_keyword_matches=2,
-#             quantitative_threshold=0.25,
-#         ),
-#         ScoreLevel.LEVEL_3: RubricCriteria(
-#             level=ScoreLevel.LEVEL_3,
-#             keywords=[
-#                 "migration", "hybrid", "modernizing", "cloud adoption",
-#                 "data warehouse", "sql server", "oracle",
-#             ],
-#             min_keyword_matches=2,
-#             quantitative_threshold=0.15,
-#         ),
-#         ScoreLevel.LEVEL_2: RubricCriteria(
-#             level=ScoreLevel.LEVEL_2,
-#             keywords=[
-#                 "legacy", "silos", "on-premise", "on premise",
-#                 "fragmented", "data quality issues",
-#             ],
-#             min_keyword_matches=1,
-#             quantitative_threshold=0.05,
-#         ),
-#         ScoreLevel.LEVEL_1: RubricCriteria(
-#             level=ScoreLevel.LEVEL_1,
-#             keywords=[
-#                 "mainframe", "spreadsheets", "manual", "no infrastructure",
-#                 "paper-based",
-#             ],
-#             min_keyword_matches=1,
-#             quantitative_threshold=0.0,
-#         ),
-#     },
-
-#     # ── AI Governance ─────────────────────────────────────────────────
-#     "ai_governance": {
-#         ScoreLevel.LEVEL_5: RubricCriteria(
-#             level=ScoreLevel.LEVEL_5,
-#             keywords=[
-#                 "caio", "cdo", "board committee", "model risk",
-#                 "chief ai officer", "ai ethics", "responsible ai",
-#                 "ai governance framework", "model governance",
-#             ],
-#             min_keyword_matches=3,
-#             quantitative_threshold=0.40,
-#         ),
-#         ScoreLevel.LEVEL_4: RubricCriteria(
-#             level=ScoreLevel.LEVEL_4,
-#             keywords=[
-#                 "vp data", "ai policy", "risk framework",
-#                 "chief data officer", "ai risk", "data governance",
-#                 "model validation", "ai principles",
-#             ],
-#             min_keyword_matches=2,
-#             quantitative_threshold=0.25,
-#         ),
-#         ScoreLevel.LEVEL_3: RubricCriteria(
-#             level=ScoreLevel.LEVEL_3,
-#             keywords=[
-#                 "director", "guidelines", "it governance",
-#                 "compliance", "risk management", "data privacy",
-#             ],
-#             min_keyword_matches=2,
-#             quantitative_threshold=0.15,
-#         ),
-#         ScoreLevel.LEVEL_2: RubricCriteria(
-#             level=ScoreLevel.LEVEL_2,
-#             keywords=[
-#                 "informal", "no policy", "ad-hoc", "ad hoc",
-#                 "limited oversight",
-#             ],
-#             min_keyword_matches=1,
-#             quantitative_threshold=0.05,
-#         ),
-#         ScoreLevel.LEVEL_1: RubricCriteria(
-#             level=ScoreLevel.LEVEL_1,
-#             keywords=[
-#                 "none", "no oversight", "unmanaged", "no governance",
-#             ],
-#             min_keyword_matches=1,
-#             quantitative_threshold=0.0,
-#         ),
-#     },
-
-#     # ── Technology Stack ──────────────────────────────────────────────
-#     "technology_stack": {
-#         ScoreLevel.LEVEL_5: RubricCriteria(
-#             level=ScoreLevel.LEVEL_5,
-#             keywords=[
-#                 "sagemaker", "mlops", "feature store", "vertex ai",
-#                 "model registry", "automated pipeline", "kubeflow",
-#                 "ml platform", "mlflow", "model serving",
-#             ],
-#             min_keyword_matches=3,
-#             quantitative_threshold=0.40,
-#         ),
-#         ScoreLevel.LEVEL_4: RubricCriteria(
-#             level=ScoreLevel.LEVEL_4,
-#             keywords=[
-#                 "mlflow", "kubeflow", "databricks ml", "experiment tracking",
-#                 "pytorch", "tensorflow", "model deployment",
-#                 "containerized", "docker", "kubernetes",
-#             ],
-#             min_keyword_matches=2,
-#             quantitative_threshold=0.25,
-#         ),
-#         ScoreLevel.LEVEL_3: RubricCriteria(
-#             level=ScoreLevel.LEVEL_3,
-#             keywords=[
-#                 "jupyter", "notebooks", "manual deploy", "scikit-learn",
-#                 "python", "r studio", "basic ml",
-#             ],
-#             min_keyword_matches=2,
-#             quantitative_threshold=0.15,
-#         ),
-#         ScoreLevel.LEVEL_2: RubricCriteria(
-#             level=ScoreLevel.LEVEL_2,
-#             keywords=[
-#                 "excel", "tableau only", "no ml", "basic bi",
-#                 "spreadsheet", "power bi only",
-#             ],
-#             min_keyword_matches=1,
-#             quantitative_threshold=0.05,
-#         ),
-#         ScoreLevel.LEVEL_1: RubricCriteria(
-#             level=ScoreLevel.LEVEL_1,
-#             keywords=[
-#                 "manual", "no tools", "no analytics", "manual reporting",
-#             ],
-#             min_keyword_matches=1,
-#             quantitative_threshold=0.0,
-#         ),
-#     },
-
-#     # ── Talent (talent_skills) ────────────────────────────────────────
-#     "talent_skills": {
-#         ScoreLevel.LEVEL_5: RubricCriteria(
-#             level=ScoreLevel.LEVEL_5,
-#             keywords=[
-#                 "ml platform", "ai research", "large team", ">20 specialists",
-#                 "ai leadership", "principal ml", "staff ml",
-#                 "research scientist", "ai lab",
-#             ],
-#             min_keyword_matches=3,
-#             quantitative_threshold=0.40,  # >40% AI job ratio
-#         ),
-#         ScoreLevel.LEVEL_4: RubricCriteria(
-#             level=ScoreLevel.LEVEL_4,
-#             keywords=[
-#                 "data science team", "ml engineers", "10-20",
-#                 "active hiring", "retention", "senior data scientist",
-#                 "ml engineer", "data engineering team",
-#             ],
-#             min_keyword_matches=2,
-#             quantitative_threshold=0.25,
-#         ),
-#         ScoreLevel.LEVEL_3: RubricCriteria(
-#             level=ScoreLevel.LEVEL_3,
-#             keywords=[
-#                 "data scientist", "growing team", "3-10",
-#                 "hiring data", "analytics team", "small team",
-#             ],
-#             min_keyword_matches=2,
-#             quantitative_threshold=0.15,
-#         ),
-#         ScoreLevel.LEVEL_2: RubricCriteria(
-#             level=ScoreLevel.LEVEL_2,
-#             keywords=[
-#                 "junior", "contractor", "turnover", "1-2 data",
-#                 "limited technical", "outsourced",
-#             ],
-#             min_keyword_matches=1,
-#             quantitative_threshold=0.05,
-#         ),
-#         ScoreLevel.LEVEL_1: RubricCriteria(
-#             level=ScoreLevel.LEVEL_1,
-#             keywords=[
-#                 "no data scientist", "vendor only", "no ai talent",
-#                 "no ml", "fully outsourced",
-#             ],
-#             min_keyword_matches=1,
-#             quantitative_threshold=0.0,
-#         ),
-#     },
-
-#     # ── Leadership (leadership_vision) ────────────────────────────────
-#     "leadership_vision": {
-#         ScoreLevel.LEVEL_5: RubricCriteria(
-#             level=ScoreLevel.LEVEL_5,
-#             keywords=[
-#                 "ceo ai", "board committee", "ai strategy",
-#                 "ai strategic plan", "ceo champions",
-#                 "multi-year ai", "ai transformation",
-#             ],
-#             min_keyword_matches=3,
-#             quantitative_threshold=0.40,
-#         ),
-#         ScoreLevel.LEVEL_4: RubricCriteria(
-#             level=ScoreLevel.LEVEL_4,
-#             keywords=[
-#                 "cto ai", "strategic priority", "c-suite",
-#                 "cdo", "ai in strategy", "executive sponsor",
-#                 "digital transformation",
-#             ],
-#             min_keyword_matches=2,
-#             quantitative_threshold=0.25,
-#         ),
-#         ScoreLevel.LEVEL_3: RubricCriteria(
-#             level=ScoreLevel.LEVEL_3,
-#             keywords=[
-#                 "vp sponsor", "department initiative", "vp-level",
-#                 "departmental ai", "pilot program",
-#             ],
-#             min_keyword_matches=2,
-#             quantitative_threshold=0.15,
-#         ),
-#         ScoreLevel.LEVEL_2: RubricCriteria(
-#             level=ScoreLevel.LEVEL_2,
-#             keywords=[
-#                 "it led", "limited awareness", "it-driven",
-#                 "no executive", "limited sponsorship",
-#             ],
-#             min_keyword_matches=1,
-#             quantitative_threshold=0.05,
-#         ),
-#         ScoreLevel.LEVEL_1: RubricCriteria(
-#             level=ScoreLevel.LEVEL_1,
-#             keywords=[
-#                 "no sponsor", "not discussed", "no ai discussion",
-#                 "no strategy",
-#             ],
-#             min_keyword_matches=1,
-#             quantitative_threshold=0.0,
-#         ),
-#     },
-
-#     # ── Use Case Portfolio ────────────────────────────────────────────
-#     "use_case_portfolio": {
-#         ScoreLevel.LEVEL_5: RubricCriteria(
-#             level=ScoreLevel.LEVEL_5,
-#             keywords=[
-#                 "production ai", "3x roi", "ai product",
-#                 "5+ use cases", "revenue-generating ai",
-#                 "ai at scale", "production deployment",
-#             ],
-#             min_keyword_matches=3,
-#             quantitative_threshold=0.40,
-#         ),
-#         ScoreLevel.LEVEL_4: RubricCriteria(
-#             level=ScoreLevel.LEVEL_4,
-#             keywords=[
-#                 "production", "measured roi", "scaling",
-#                 "2-4 use cases", "deployed ai", "ai in production",
-#             ],
-#             min_keyword_matches=2,
-#             quantitative_threshold=0.25,
-#         ),
-#         ScoreLevel.LEVEL_3: RubricCriteria(
-#             level=ScoreLevel.LEVEL_3,
-#             keywords=[
-#                 "pilot", "early production", "proof of concept moving",
-#                 "poc to production", "initial deployment",
-#             ],
-#             min_keyword_matches=2,
-#             quantitative_threshold=0.15,
-#         ),
-#         ScoreLevel.LEVEL_2: RubricCriteria(
-#             level=ScoreLevel.LEVEL_2,
-#             keywords=[
-#                 "poc", "proof of concept", "prototype",
-#                 "testing", "experimental",
-#             ],
-#             min_keyword_matches=1,
-#             quantitative_threshold=0.05,
-#         ),
-#         ScoreLevel.LEVEL_1: RubricCriteria(
-#             level=ScoreLevel.LEVEL_1,
-#             keywords=[
-#                 "exploring", "no use cases", "no ai use",
-#                 "considering", "no deployment",
-#             ],
-#             min_keyword_matches=1,
-#             quantitative_threshold=0.0,
-#         ),
-#     },
-
-#     # ── Culture (culture_change) ──────────────────────────────────────
-#     "culture_change": {
-#         ScoreLevel.LEVEL_5: RubricCriteria(
-#             level=ScoreLevel.LEVEL_5,
-#             keywords=[
-#                 "innovative", "data-driven", "fail-fast",
-#                 "experimentation culture", "innovation rewarded",
-#                 "data culture", "growth mindset",
-#             ],
-#             min_keyword_matches=3,
-#             quantitative_threshold=0.40,
-#         ),
-#         ScoreLevel.LEVEL_4: RubricCriteria(
-#             level=ScoreLevel.LEVEL_4,
-#             keywords=[
-#                 "experimental", "learning culture", "data literacy",
-#                 "encourages experimentation", "open to innovation",
-#             ],
-#             min_keyword_matches=2,
-#             quantitative_threshold=0.25,
-#         ),
-#         ScoreLevel.LEVEL_3: RubricCriteria(
-#             level=ScoreLevel.LEVEL_3,
-#             keywords=[
-#                 "open to change", "some resistance", "mixed",
-#                 "evolving", "transitioning",
-#             ],
-#             min_keyword_matches=2,
-#             quantitative_threshold=0.15,
-#         ),
-#         ScoreLevel.LEVEL_2: RubricCriteria(
-#             level=ScoreLevel.LEVEL_2,
-#             keywords=[
-#                 "bureaucratic", "resistant", "slow",
-#                 "hierarchical", "traditional", "risk-averse",
-#             ],
-#             min_keyword_matches=1,
-#             quantitative_threshold=0.05,
-#         ),
-#         ScoreLevel.LEVEL_1: RubricCriteria(
-#             level=ScoreLevel.LEVEL_1,
-#             keywords=[
-#                 "hostile", "siloed", "no data culture",
-#                 "change hostile", "completely resistant",
-#             ],
-#             min_keyword_matches=1,
-#             quantitative_threshold=0.0,
-#         ),
-#     },
-# }
-
-
-# # ---------------------------------------------------------------------------
-# # RubricScorer
-# # ---------------------------------------------------------------------------
-
-# class RubricScorer:
-#     """Score evidence against PE Org-AI-R rubrics."""
-
-#     def __init__(self):
-#         self.rubrics = DIMENSION_RUBRICS
-
-#     def score_dimension(
-#         self,
-#         dimension: str,
-#         evidence_text: str,
-#         quantitative_metrics: Optional[Dict[str, float]] = None,
-#     ) -> RubricResult:
-#         """
-#         Score a dimension using rubric matching.
-
-#         Algorithm:
-#           1. Normalize evidence text (lowercase)
-#           2. For each level (5 down to 1):
-#              a. Count keyword matches
-#              b. Check quantitative threshold
-#              c. If criteria met → interpolate score within level range
-#           3. Use keyword density to interpolate within range:
-#              - extra matches above min push score higher in range
-
-#         Args:
-#             dimension: One of the 7 dimension names (e.g. "talent_skills")
-#             evidence_text: Concatenated evidence text from SEC sections / signals
-#             quantitative_metrics: Dict of metric_name → value
-#                 e.g., {"ai_job_ratio": 0.35, "patent_count": 12}
-
-#         Returns:
-#             RubricResult with score, level, and matched keywords
-#         """
-#         if quantitative_metrics is None:
-#             quantitative_metrics = {}
-
-#         text = evidence_text.lower()
-#         rubric = self.rubrics.get(dimension, {})
-
-#         if not rubric:
-#             # Unknown dimension — return midpoint with low confidence
-#             return RubricResult(
-#                 dimension=dimension,
-#                 level=ScoreLevel.LEVEL_3,
-#                 score=Decimal("50.00"),
-#                 matched_keywords=[],
-#                 keyword_match_count=0,
-#                 confidence=Decimal("0.300"),
-#                 rationale=f"No rubric defined for dimension '{dimension}'",
-#             )
-
-#         # Get the primary quantitative metric for this dimension
-#         primary_metric = self._get_primary_metric(dimension, quantitative_metrics)
-
-#         # Check each level from 5 (best) down to 1 (worst)
-#         for level in [ScoreLevel.LEVEL_5, ScoreLevel.LEVEL_4, ScoreLevel.LEVEL_3,
-#                       ScoreLevel.LEVEL_2, ScoreLevel.LEVEL_1]:
-#             criteria = rubric.get(level)
-#             if not criteria:
-#                 continue
-
-#             # Count keyword matches
-#             matches = [kw for kw in criteria.keywords if kw in text]
-#             match_count = len(matches)
-
-#             # Check quantitative threshold (if metric available)
-#             quant_met = primary_metric >= criteria.quantitative_threshold if primary_metric is not None else True
-
-#             # Criteria met?
-#             if match_count >= criteria.min_keyword_matches and quant_met:
-#                 # Interpolate within level range
-#                 score = self._interpolate_score(level, match_count, criteria)
-
-#                 # Calculate confidence based on match quality
-#                 confidence = self._calculate_confidence(
-#                     match_count, criteria.min_keyword_matches,
-#                     len(criteria.keywords), primary_metric is not None
-#                 )
-
-#                 rationale = (
-#                     f"Matched {match_count}/{criteria.min_keyword_matches} required keywords "
-#                     f"for {level.label} ({level.min_score}-{level.max_score}). "
-#                     f"Keywords: {', '.join(matches[:5])}"
-#                 )
-
-#                 return RubricResult(
-#                     dimension=dimension,
-#                     level=level,
-#                     score=score,
-#                     matched_keywords=matches,
-#                     keyword_match_count=match_count,
-#                     confidence=confidence,
-#                     rationale=rationale,
-#                 )
-
-#         # No level matched — default to Level 1 midpoint
-#         return RubricResult(
-#             dimension=dimension,
-#             level=ScoreLevel.LEVEL_1,
-#             score=Decimal("10.00"),
-#             matched_keywords=[],
-#             keyword_match_count=0,
-#             confidence=Decimal("0.300"),
-#             rationale="No rubric criteria matched; defaulting to Level 1",
-#         )
-
-#     def score_all_dimensions(
-#         self,
-#         evidence_by_dimension: Dict[str, str],
-#         metrics_by_dimension: Optional[Dict[str, Dict[str, float]]] = None,
-#     ) -> Dict[str, RubricResult]:
-#         """
-#         Score all 7 dimensions.
-
-#         Args:
-#             evidence_by_dimension: Dict of dimension_name → concatenated evidence text
-#             metrics_by_dimension: Dict of dimension_name → {metric: value}
-
-#         Returns:
-#             Dict of dimension_name → RubricResult
-#         """
-#         if metrics_by_dimension is None:
-#             metrics_by_dimension = {}
-
-#         results = {}
-#         for dim_name in self.rubrics:
-#             text = evidence_by_dimension.get(dim_name, "")
-#             metrics = metrics_by_dimension.get(dim_name, {})
-#             results[dim_name] = self.score_dimension(dim_name, text, metrics)
-#         return results
-
-#     # ------------------------------------------------------------------
-#     # Private helpers
-#     # ------------------------------------------------------------------
-
-#     def _interpolate_score(
-#         self,
-#         level: ScoreLevel,
-#         match_count: int,
-#         criteria: RubricCriteria,
-#     ) -> Decimal:
-#         """
-#         Interpolate score within a level's range based on keyword density.
-
-#         More matches above the minimum → higher position in range.
-#         """
-#         min_s = level.min_score
-#         max_s = level.max_score
-#         range_size = max_s - min_s
-
-#         # How many extra matches beyond minimum
-#         extra = match_count - criteria.min_keyword_matches
-#         max_extra = max(len(criteria.keywords) - criteria.min_keyword_matches, 1)
-
-#         # Ratio of extra matches (0.0 to 1.0)
-#         ratio = min(extra / max_extra, 1.0)
-
-#         # Interpolate: minimum of range + ratio * range
-#         score = min_s + ratio * range_size
-#         score = max(min_s, min(max_s, score))
-
-#         return Decimal(str(round(score, 2)))
-
-#     def _calculate_confidence(
-#         self,
-#         match_count: int,
-#         min_matches: int,
-#         total_keywords: int,
-#         has_quant: bool,
-#     ) -> Decimal:
-#         """
-#         Calculate confidence of the rubric match.
-
-#         Factors:
-#           - Match ratio (matches / total keywords)
-#           - Whether quantitative metric was available
-#           - Base confidence of 0.5 (rubric matching is keyword-based)
-#         """
-#         base = 0.50
-#         # Match quality bonus (up to 0.30)
-#         match_ratio = match_count / max(total_keywords, 1)
-#         match_bonus = min(match_ratio * 0.30, 0.30)
-#         # Quantitative bonus
-#         quant_bonus = 0.10 if has_quant else 0.0
-#         # Excess match bonus
-#         excess_bonus = min((match_count - min_matches) * 0.02, 0.10) if match_count > min_matches else 0.0
-
-#         conf = min(base + match_bonus + quant_bonus + excess_bonus, 0.95)
-#         return Decimal(str(round(conf, 3)))
-
-#     def _get_primary_metric(
-#         self,
-#         dimension: str,
-#         metrics: Dict[str, float],
-#     ) -> Optional[float]:
-#         """
-#         Get the primary quantitative metric for a dimension.
-
-#         Maps each dimension to its most relevant metric key.
-#         """
-#         metric_map = {
-#             "talent_skills": ["ai_job_ratio", "ai_jobs", "team_size"],
-#             "technology_stack": ["ai_tech_ratio", "tech_count", "ai_tools"],
-#             "data_infrastructure": ["data_tech_count", "cloud_adoption"],
-#             "ai_governance": ["governance_score", "risk_mentions"],
-#             "leadership_vision": ["leadership_score", "exec_ai_mentions"],
-#             "use_case_portfolio": ["use_case_count", "production_ai_count"],
-#             "culture_change": ["culture_score", "innovation_mentions"],
-#         }
-
-#         preferred_keys = metric_map.get(dimension, [])
-#         for key in preferred_keys:
-#             if key in metrics:
-#                 return metrics[key]
-
-#         # Fallback: return first available metric
-#         if metrics:
-#             return next(iter(metrics.values()))
-#         return None
 
 """
 Rubric-Based Scorer — Task 5.0b (CS3)
@@ -948,24 +271,52 @@ DIMENSION_RUBRICS: Dict[str, Dict[ScoreLevel, RubricCriteria]] = {
         ),
         ScoreLevel.LEVEL_4: RubricCriteria(
             level=ScoreLevel.LEVEL_4,
-            keywords=[
+            # keywords=[
+            #     "data science team", "ml engineers", "10-20",
+            #     "active hiring", "retention", "senior data scientist",
+            #     "ml engineer", "data engineering team",
+            #     "skilled workforce", "technical talent", "engineers",
+            #     "scientists", "researchers", "specialized talent",
+            #     "talent acquisition", "employee development",
+            # ],
+             keywords=[
                 "data science team", "ml engineers", "10-20",
                 "active hiring", "retention", "senior data scientist",
                 "ml engineer", "data engineering team",
                 "skilled workforce", "technical talent", "engineers",
                 "scientists", "researchers", "specialized talent",
                 "talent acquisition", "employee development",
+                # 10-K workforce language
+                "engineering team", "technology team",
+                "research and development", "r&d",
+                "technical expertise", "software engineers",
+                "technology professionals", "it professionals",
+                "talent pipeline", "technical training",
+                "employee training", "upskilling",
+                "professional development", "learning programs",
+                "stem", "university recruiting",
             ],
             min_keyword_matches=2,
             quantitative_threshold=0.25,
         ),
         ScoreLevel.LEVEL_3: RubricCriteria(
             level=ScoreLevel.LEVEL_3,
-            keywords=[
+            # keywords=[
+            #     "data scientist", "growing team", "3-10",
+            #     "hiring data", "analytics team", "small team",
+            #     "workforce", "employees", "human capital",
+            #     "training programs", "talent development",
+            # ],
+              keywords=[
                 "data scientist", "growing team", "3-10",
                 "hiring data", "analytics team", "small team",
                 "workforce", "employees", "human capital",
                 "training programs", "talent development",
+                # Generic 10-K workforce language
+                "headcount", "staffing", "recruiting",
+                "compensation", "benefits", "retention programs",
+                "employee engagement", "workforce development",
+                "full-time employees", "team members", "associates",
             ],
             min_keyword_matches=2,
             quantitative_threshold=0.15,
@@ -1092,7 +443,16 @@ DIMENSION_RUBRICS: Dict[str, Dict[ScoreLevel, RubricCriteria]] = {
         ),
         ScoreLevel.LEVEL_4: RubricCriteria(
             level=ScoreLevel.LEVEL_4,
-            keywords=[
+            # keywords=[
+            #     "production", "measured roi", "scaling",
+            #     "2-4 use cases", "deployed ai", "ai in production",
+            #     "machine learning", "deep learning", "automation",
+            #     "predictive analytics", "computer vision",
+            #     "natural language", "recommendation",
+            #     "supply chain optimization", "fraud detection",
+            #     "customer experience", "operational efficiency",
+            # ],
+             keywords=[
                 "production", "measured roi", "scaling",
                 "2-4 use cases", "deployed ai", "ai in production",
                 "machine learning", "deep learning", "automation",
@@ -1100,18 +460,45 @@ DIMENSION_RUBRICS: Dict[str, Dict[ScoreLevel, RubricCriteria]] = {
                 "natural language", "recommendation",
                 "supply chain optimization", "fraud detection",
                 "customer experience", "operational efficiency",
+                # Industry-specific AI use cases
+                "predictive maintenance", "demand forecasting",
+                "inventory optimization", "route optimization",
+                "credit risk model", "underwriting model",
+                "claims processing", "chatbot", "virtual assistant",
+                "anomaly detection", "quality control",
+                "process automation", "robotic process",
+                "intelligent automation", "sensor data",
+                "iot", "connected", "additive manufacturing",
+                "condition monitoring", "fleet management",
+                "supply chain", "logistics",
+                "pricing optimization", "dynamic pricing",
+                "ecommerce", "omnichannel", "e-commerce",
             ],
             min_keyword_matches=2,
             quantitative_threshold=0.25,
         ),
         ScoreLevel.LEVEL_3: RubricCriteria(
             level=ScoreLevel.LEVEL_3,
-            keywords=[
+            # keywords=[
+            #     "pilot", "early production", "proof of concept moving",
+            #     "poc to production", "initial deployment",
+            #     "exploring ai", "evaluating", "implementing",
+            #     "digital transformation", "technology initiative",
+            #     "analytics", "data analytics",
+            # ],
+             keywords=[
                 "pilot", "early production", "proof of concept moving",
                 "poc to production", "initial deployment",
                 "exploring ai", "evaluating", "implementing",
                 "digital transformation", "technology initiative",
                 "analytics", "data analytics",
+                # Industry language
+                "modernization", "digitization", "digital strategy",
+                "technology roadmap", "innovation program",
+                "enterprise software", "erp", "crm",
+                "mobile app", "digital services",
+                "operational technology", "industrial internet",
+                "smart factory", "industry 4.0",
             ],
             min_keyword_matches=2,
             quantitative_threshold=0.15,

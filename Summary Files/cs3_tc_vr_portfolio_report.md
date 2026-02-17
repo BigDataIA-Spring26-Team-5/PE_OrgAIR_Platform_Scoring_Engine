@@ -1,53 +1,38 @@
 # Talent Concentration & V^R Scoring — CS3 Portfolio Report
 
-**Generated:** 2026-02-14 02:31 UTC
+**Generated:** 2026-02-17 19:58 UTC
 **Companies:** 5 scored, 0 failed
-**Duration:** 76.68s
+**Duration:** 75.23s
 
 ## Portfolio Summary Table
 
 | Ticker | TC | TalentRiskAdj | Weighted Dim | V^R | TC Range | TC ✓ | V^R Range | V^R ✓ |
 |--------|------|---------------|-------------|-------|----------|------|-----------|-------|
-| NVDA | 0.0973 | 1.0000 | 71.39 | 71.39 | 0.05 - 0.20 | ✅ | 80 - 100 | ⚠️ |
-| JPM | 0.2159 | 1.0000 | 65.38 | 65.38 | 0.10 - 0.25 | ✅ | 60 - 80 | ✅ |
-| WMT | 0.2789 | 0.9957 | 68.43 | 68.14 | 0.12 - 0.28 | ✅ | 50 - 70 | ✅ |
-| GE | 0.3024 | 0.9921 | 35.11 | 34.84 | 0.18 - 0.35 | ✅ | 40 - 60 | ⚠️ |
-| DG | 0.3200 | 0.9895 | 38.14 | 37.74 | 0.22 - 0.40 | ✅ | 30 - 50 | ✅ |
+| NVDA | 0.0974 | 1.0000 | 80.04 | 80.04 | 0.05 - 0.20 | ✅ | 80 - 100 | ✅ |
+| JPM | 0.2159 | 1.0000 | 69.08 | 69.08 | 0.10 - 0.25 | ✅ | 60 - 80 | ✅ |
+| WMT | 0.2789 | 0.9957 | 69.14 | 68.84 | 0.12 - 0.28 | ✅ | 50 - 70 | ✅ |
+| GE | 0.3024 | 0.9921 | 35.59 | 35.31 | 0.18 - 0.35 | ✅ | 40 - 60 | ⚠️ |
+| DG | 0.3200 | 0.9895 | 38.60 | 38.19 | 0.22 - 0.40 | ✅ | 30 - 50 | ✅ |
 
 ## Validation Scorecard
 
 - **TC:** 5/5 ✅
-- **V^R:** 3/5 ✅, 2 close
+- **V^R:** 4/5 ✅, 1 close
 
-**Relative ordering:** NVDA > WMT > JPM > DG > GE
+**Relative ordering:** NVDA > JPM > WMT > DG > GE
 
 ## V^R Gap Analysis
 
 The remaining gaps are defensible. Details per out-of-range company:
 
-### NVDA — V^R = 71.39 (expected 80–100)
-
-**Dimension scores (low → high):**
-  - `culture_change`: 32.9
-  - `ai_governance`: 60.6
-  - `leadership_vision`: 60.7
-  - `talent_skills`: 71.8
-  - `data_infrastructure`: 82.3
-  - `technology_stack`: 88.1
-  - `use_case_portfolio`: 90.8
-
-**Job analysis:** 46 AI jobs (2 senior, 32 mid, 0 entry), 21 unique skills
-
-**Explanation:** NVDA at 71 instead of 80+ is because CS2's leadership signal (DEF 14A keyword scan) scored NVIDIA low at 50 — this is a known limitation of keyword-based leadership scoring for a company whose CEO is the AI strategy. Jensen Huang doesn't need to 'mention AI in strategy documents' — he is the strategy. A semantic or LLM-based scorer would resolve this.
-
-### GE — V^R = 34.84 (expected 40–60)
+### GE — V^R = 35.31 (expected 40–60)
 
 **Dimension scores (low → high):**
   - `use_case_portfolio`: 13.3
-  - `talent_skills`: 13.7
-  - `culture_change`: 26.7
+  - `talent_skills`: 14.2
+  - `culture_change`: 30.1
   - `technology_stack`: 35.8
-  - `leadership_vision`: 38.8
+  - `leadership_vision`: 39.1
   - `data_infrastructure`: 51.7
   - `ai_governance`: 58.7
 
@@ -59,7 +44,7 @@ The remaining gaps are defensible. Details per out-of-range company:
 
 | Ticker | Leadership Ratio | Team Size Factor | Skill Concentration | Individual Factor | TC |
 |--------|-----------------|-----------------|--------------------|--------------------|------|
-| NVDA | 0.0435 | 0.1453 | 0.0000 | 0.0435 | 0.0973 |
+| NVDA | 0.0435 | 0.1453 | 0.0000 | 0.0444 | 0.0974 |
 | JPM | 0.1351 | 0.1617 | 0.2667 | 0.0133 | 0.2159 |
 | WMT | 0.0000 | 0.4762 | 0.4667 | 0.0000 | 0.2789 |
 | GE | 0.0000 | 0.3415 | 1.0000 | 0.0000 | 0.3024 |
@@ -69,11 +54,11 @@ The remaining gaps are defensible. Details per out-of-range company:
 
 | Ticker | Ai Governance | Culture Change | Data Infrastructure | Leadership Vision | Talent Skills | Technology Stack | Use Case Portfolio |
 |--------|------|------|------|------|------|------|------|
-| NVDA | 60.6 | 32.9 | 82.3 | 60.7 | 71.8 | 88.1 | 90.8 |
-| JPM | 76.6 | 33.1 | 72.9 | 72.9 | 58.8 | 72.6 | 58.9 |
-| WMT | 73.8 | 30.4 | 79.0 | 64.8 | 59.5 | 81.6 | 77.7 |
-| GE | 58.7 | 26.7 | 51.7 | 38.8 | 13.7 | 35.8 | 13.3 |
-| DG | 67.1 | 25.6 | 49.3 | 51.4 | 3.1 | 29.6 | 41.7 |
+| NVDA | 79.2 | 65.4 | 82.3 | 74.9 | 76.2 | 88.1 | 90.8 |
+| JPM | 76.6 | 37.5 | 72.9 | 73.3 | 59.4 | 78.2 | 77.8 |
+| WMT | 73.8 | 36.4 | 79.0 | 65.2 | 60.1 | 81.5 | 77.5 |
+| GE | 58.7 | 30.1 | 51.7 | 39.1 | 14.2 | 35.8 | 13.3 |
+| DG | 67.1 | 26.1 | 49.3 | 51.5 | 3.2 | 30.6 | 43.8 |
 
 ---
 
