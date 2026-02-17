@@ -18,9 +18,11 @@ from app.routers.evidence import router as evidence_router
 from app.routers.scoring import router as scoring_router
 from fastapi.middleware.cors import CORSMiddleware
 from app.routers.board_governance import router as board_governance_router
+from app.routers.glassdoor_signals import router as glassdoor_signals_router
 # from app.routers.tc_vr_scoring import router as tc_vr_scoring_router
 from app.routers.tc_vr_scoring import router as tc_vr_router
-
+from app.routers.position_factor import router as pf_router
+from app.routers.hr_scoring import router as hr_router
 load_dotenv()
 
 from app.shutdown import set_shutdown, is_shutting_down
@@ -42,8 +44,11 @@ app.add_exception_handler(RequestValidationError, validation_exception_handler)
 
 # REGISTER ROUTERS
 # app.include_router(tc_vr_scoring_router)
+app.include_router(hr_router)
+app.include_router(pf_router)
 app.include_router(tc_vr_router)
 app.include_router(board_governance_router)
+app.include_router(glassdoor_signals_router)
 app.include_router(scoring_router)
 app.include_router(health_router)
 app.include_router(industries_router)
