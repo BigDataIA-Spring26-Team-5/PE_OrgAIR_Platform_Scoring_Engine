@@ -755,6 +755,9 @@ class LeadershipAnalyzer:
         "global technology": 5,
         "global head of technology": 6,
         "co-chief operating officer": 3,
+        "co-chief operating officer": 3,
+        "chief scientist": 7,
+        "svp of research": 5,
     }
 
     TECH_EXEC_ABBREVS_STRICT = {
@@ -788,6 +791,21 @@ class LeadershipAnalyzer:
         "technology capabilities": 1.5,
         "fintech": 2,
         "financial technology": 2,
+         "accelerated computing": 3,
+        "full-stack": 2,
+        "full stack computing": 3,
+        "data center scale": 2,
+        "gpu computing": 2.5,
+        "inference platform": 3,
+        "training platform": 3,
+        "cuda": 2,
+        "tensor core": 2,
+        "ai computing": 3,
+        "ai infrastructure": 3,
+        "semiconductor": 1.5,
+        "parallel processing": 2,
+        "compute platform": 2,
+        "ai workload": 2.5,
     }
 
     COMP_METRIC_PATTERNS = [
@@ -802,6 +820,14 @@ class LeadershipAnalyzer:
         (r'technology\s+(?:and\s+)?(?:operations|infrastructure)', 3),
         (r'strategic\s+(?:technology|digital|ai)', 4),
         (r'(?:invested|investment|spend|spent)\s+(?:[\w\s]*?)(?:technology|digital|ai)', 3),
+        #  (r'(?:gpu|chip|semiconductor|compute)\\s+(?:revenue|growth|market\\s+share)', 4),
+        # (r'(?:data\\s+center|datacenter)\\s+(?:revenue|growth|demand)', 4),
+        # (r'(?:platform|ecosystem)\\s+(?:growth|adoption|expansion)', 3),
+        # (r'(?:research|r&d|engineering)\\s+(?:investment|headcount|productivity)', 3),
+        (r'(?:gpu|chip|semiconductor|compute)\s+(?:revenue|growth|market\s+share)', 4),
+        (r'(?:data\s+center|datacenter)\s+(?:revenue|growth|demand)', 4),
+        (r'(?:platform|ecosystem)\s+(?:growth|adoption|expansion)', 3),
+        (r'(?:research|r&d|engineering)\s+(?:investment|headcount|productivity)', 3),
     ]
 
     BOARD_EXPERTISE_PATTERNS = [

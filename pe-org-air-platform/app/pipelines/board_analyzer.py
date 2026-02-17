@@ -333,7 +333,8 @@ def extract_strategy_text(text: str) -> str:
         idx = t.find(anchor)
         if idx != -1:
             return text[idx:idx + 6000]
-    for anchor in ["artificial intelligence", "machine learning", "generative ai", "ai "]:
+    for anchor in ["artificial intelligence", "machine learning", "generative ai", "ai ",
+                    "accelerated computing", "chief technology officer", "gpu", "data center"]:
         idx = t.find(anchor)
         if idx != -1:
             start = max(0, idx - 1500)
@@ -1173,6 +1174,13 @@ class BoardCompositionAnalyzer:
         "supply chain", "logistics", "warehouse automation",
         "automation", "robotics", "predictive maintenance",
         "advanced analytics", "mlops", "responsible ai",
+         # Semiconductor / GPU domain
+        "semiconductor", "chip design", "gpu",
+        "accelerated computing", "high performance computing",
+        "parallel computing", "graphics processing",
+        "cuda", "tensor", "inference",
+        "software engineering", "systems engineering",
+        "cloud infrastructure", "platform engineering",
     ]
     TECH_COMMITTEE_NAMES = [
         "technology committee", "digital committee",
@@ -1187,6 +1195,15 @@ class BoardCompositionAnalyzer:
         "chief data officer", "cdo", "chief ai officer", "caio",
         "chief analytics officer", "cao", "chief digital officer",
         "chief technology officer", "cto",
+         # Senior tech leadership (equivalent at tech companies)
+        "svp of software", "svp software engineering",
+        "vp of deep learning", "vp deep learning",
+        "vp of ai", "svp of ai",
+        "vp of engineering", "svp of engineering",
+        "evp of engineering",
+        "svp of gpu", "vp of gpu",
+        "head of engineering", "head of software",
+        "svp of research", "vp of research",
     ]
     RISK_TECH_WORDS = [
         "technology", "cyber", "digital", "information security",
@@ -1197,14 +1214,21 @@ class BoardCompositionAnalyzer:
         "generative ai", "genai", "ai strategy", "ai-driven",
         "automation", "advanced analytics", "data science",
         "computer vision", "optimization",
+        # Domain-specific (NVDA proxy uses these instead of "AI")
+        "accelerated computing", "deep learning",
+        "gpu", "inference", "data center",
+        "ai platform", "ai infrastructure",
+        "neural network", "large language model",
+        "foundation model", "full-stack", "cuda",
     ]
-
+  
     def __init__(self, s3: Optional[S3StorageService] = None, doc_repo: Optional[DocumentRepository] = None):
         self.s3 = s3
         self.doc_repo = doc_repo
         self._last_evidence_trail: Dict[str, dict] = {}
 
-    def analyze_board(self, company_id: str, ticker: str, members: List[BoardMember], committees: List[str], strategy_text: str = "") -> GovernanceSignal:
+    # def analyze_board(self, company_id: str, ticker: str, members: List[BoardMember], committees: List[str], strategy_text: str = "") -> GovernanceSignal:
+    def analyze_board(self, company_id: str, ticker: str, members: List[BoardMember], committees: List[str], strategy_text: str = "", full_proxy_text: str = "") -> GovernanceSignal:
         score = D("20")
         relevant_comms: List[str] = []
         trail: Dict[str, dict] = {}
@@ -1226,6 +1250,16 @@ class BoardCompositionAnalyzer:
             score += D("20")
         trail["ai_expertise"] = {"points": 20 if has_ai else 0, "max_points": 20, "triggered": has_ai, "expert_count": len(ai_experts)}
 
+        # has_officer = False
+        # for m in members:
+        #     combined = (m.title + " " + m.bio).lower()
+        #     if any(dt in combined for dt in self.DATA_OFFICER_TITLES):
+        #         if any(w in combined for w in ["chief", "officer", "vp", "svp", "head", "president"]):
+        #             has_officer = True
+        #             break
+        # if has_officer:
+        #     score += D("15")
+
         has_officer = False
         for m in members:
             combined = (m.title + " " + m.bio).lower()
@@ -1233,6 +1267,29 @@ class BoardCompositionAnalyzer:
                 if any(w in combined for w in ["chief", "officer", "vp", "svp", "head", "president"]):
                     has_officer = True
                     break
+        # # Also search proxy/strategy text for exec officer titles
+        # # (CTO, CDO etc. are executive officers, not always board members)
+        # if not has_officer and strategy_text:
+        #     proxy_lower = strategy_text.lower()
+        #     for dt in self.DATA_OFFICER_TITLES:
+        #         if dt in proxy_lower:
+        #             idx = proxy_lower.find(dt)
+        #             context = proxy_lower[max(0, idx - 60):idx + 80]
+        #             if "former" not in context and "retired" not in context and "prior" not in context:
+        #                 has_officer = True
+        #                 break
+        # Also search full proxy text for exec officer titles
+        # (CTO, CDO etc. are executive officers, not always board members)
+        search_text = full_proxy_text or strategy_text
+        if not has_officer and search_text:
+            proxy_lower = search_text.lower()
+            for dt in self.DATA_OFFICER_TITLES:
+                if dt in proxy_lower:
+                    idx = proxy_lower.find(dt)
+                    context = proxy_lower[max(0, idx - 60):idx + 80]
+                    if "former" not in context and "retired" not in context and "prior" not in context:
+                        has_officer = True
+                        break
         if has_officer:
             score += D("15")
         trail["data_officer"] = {"points": 15 if has_officer else 0, "max_points": 15, "triggered": has_officer}
@@ -1263,14 +1320,24 @@ class BoardCompositionAnalyzer:
                         break
                 if has_risk_tech:
                     break
+        if not has_risk_tech and full_proxy_text:
+            pt_lower = full_proxy_text.lower()
+            if ("oversight" in pt_lower or "oversee" in pt_lower) and any(w in pt_lower for w in ["technology risk", "cybersecurity risk", "information security risk"]):
+                has_risk_tech = True
         if has_risk_tech:
             score += D("10")
         trail["risk_tech_oversight"] = {"points": 10 if has_risk_tech else 0, "max_points": 10, "triggered": has_risk_tech}
 
+        # has_ai_strat = False
+        # strat_matches = []
+        # if strategy_text:
+        #     strat_matches = [kw for kw in self.AI_STRATEGY_KEYWORDS if kw in strategy_text.lower()]
+        #     has_ai_strat = len(strat_matches) > 0
         has_ai_strat = False
         strat_matches = []
-        if strategy_text:
-            strat_matches = [kw for kw in self.AI_STRATEGY_KEYWORDS if kw in strategy_text.lower()]
+        ai_search_text = full_proxy_text or strategy_text
+        if ai_search_text:
+            strat_matches = [kw for kw in self.AI_STRATEGY_KEYWORDS if kw in ai_search_text.lower()]
             has_ai_strat = len(strat_matches) > 0
         if has_ai_strat:
             score += D("10")
@@ -1306,9 +1373,13 @@ class BoardCompositionAnalyzer:
         logger.info("[%s] Committees: %s", ticker, committees[:10])
         for m in members[:3]:
             logger.info("[%s]   %s | %s | indep=%s | tenure=%dy", ticker, m.name, m.title, m.is_independent, m.tenure_years)
+        # strategy_text = extract_strategy_text(proxy.text_content)
+        # logger.info("[%s] Strategy window: %s chars", ticker, f"{len(strategy_text):,}")
+        # signal = self.analyze_board(cid, ticker, members, committees, strategy_text)
+
         strategy_text = extract_strategy_text(proxy.text_content)
         logger.info("[%s] Strategy window: %s chars", ticker, f"{len(strategy_text):,}")
-        signal = self.analyze_board(cid, ticker, members, committees, strategy_text)
+        signal = self.analyze_board(cid, ticker, members, committees, strategy_text, full_proxy_text=proxy.text_content)
         logger.info("[%s] GOVERNANCE SCORE: %s/100  (confidence: %s)", ticker, signal.governance_score, signal.confidence)
         logger.info("[%s]   Base:                  20", ticker)
         logger.info("[%s]   Tech Committee:        %s", ticker, "YES (+15)" if signal.has_tech_committee else "NO  (+0)")
