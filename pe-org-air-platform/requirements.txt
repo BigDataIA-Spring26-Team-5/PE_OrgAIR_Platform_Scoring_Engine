@@ -68,6 +68,11 @@ pandas>=2.1.0
 numpy>=1.26.0
 
 
+# Logging
+
+structlog>=25.0.0
+
+
 # Job Scraping (Signals Pipeline)
 
 python-jobspy>=1.1.0
