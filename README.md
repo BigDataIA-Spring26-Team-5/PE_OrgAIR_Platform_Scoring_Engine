@@ -49,3 +49,21 @@ The patent score feeds into CS3 as the innovation_activity signal, which maps to
 
 - Dollar General only recently created an SVP of AI Optimization role in November 2025 — this is brand new for them. Retail Dive They partnered with Shelf Engine's AI for produce ordering, but that's a vendor relationship, not internal AI hiring. Supply Chain Dive Dollar General is a discount retailer with 19,000+ stores focused on low-cost operations — they have minimal in-house tech capability. The 0.0 hiring score (only 1 tech job out of 39 total, 0 AI) is accurate.
 For patents, Dollar General's AI efforts are very recent (2024-2025) and vendor-driven, not R&D-driven. Retail Dive A discount retailer with no R&D lab having 0 patents is completely expected.
+
+## Market Cap Percentile Inputs
+
+Manual market cap percentiles were determined through analysis of sector peers 
+as of February 2026:
+
+| Ticker | Company | Sector | MCap Percentile | Reasoning |
+|--------|---------|--------|-----------------|-----------|
+| NVDA | NVIDIA | Technology | 0.95 | 3rd largest tech company after Apple and Microsoft |
+| JPM | JPMorgan | Financial Svc | 0.85 | Largest US bank by market cap (~$580B) |
+| WMT | Walmart | Retail | 0.60 | Large retailer but Amazon significantly larger |
+| GE | General Electric | Manufacturing | 0.50 | Mid-pack in manufacturing sector (~$170B) |
+| DG | Dollar General | Retail | 0.30 | Smaller retailer in budget segment (~$22B) |
+
+**Data Sources:**
+- Market capitalizations from Yahoo Finance (Feb 2026)
+- Sector peer comparisons from S&P sector indices
+- Percentiles calculated relative to sector constituents
