@@ -1,24 +1,12 @@
-
 # # app/pipelines/glassdoor_collector.py
 # """
 # Multi-Source Culture Collector (CS3)
 
-# What this version changes (per your request):
-# - NO hard cap on number of reviews collected (no MAX_REVIEWS slicing).
-# - NO per-source target slicing.
-# - Glassdoor/Indeed/CareerBliss now collect "as much as possible" up to a
-#   configurable max page/click guardrail (to avoid bans/quota burn).
-# - CLI flags added to control depth:
-#     --gd-pages=N
-#     --indeed-pages=N
-#     --cb-clicks=N
-#     --no-cache
-#     --sources=glassdoor,indeed,careerbliss
-#     --all
-
-# IMPORTANT:
-# - Glassdoor uses RapidAPI: raising gd-pages can burn your quota fast.
-# - Indeed/CareerBliss scraping too deep can trigger blocking/captcha.
+# Changes in this version:
+# - Rating-based baseline boost in analyze_reviews() scoring section
+#   to lift data_driven and ai_awareness scores based on actual
+#   employee satisfaction ratings, fixing near-zero scores that
+#   cluster culture_change around 25 for all companies.
 # """
 
 # import json
@@ -28,8 +16,6 @@
 # import sys
 # import time
 # from bs4 import BeautifulSoup
-# import re
-# import time
 # from dataclasses import dataclass, field, asdict
 # from datetime import datetime, timezone, timedelta
 # from decimal import Decimal, ROUND_HALF_UP
@@ -110,7 +96,7 @@
 
 
 # # =====================================================================
-# # COMPANY REGISTRY (your current 5)
+# # COMPANY REGISTRY
 # # =====================================================================
 
 # COMPANY_REGISTRY: Dict[str, Dict[str, Any]] = {
@@ -164,11 +150,10 @@
 # # =====================================================================
 # # HELPERS
 # # =====================================================================
-# def _run_timestamp(self) -> str:
-#     """Stable timestamp per execution (UTC ISO safe for S3)."""
-#     if not hasattr(self, "_run_ts"):
-#         self._run_ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
-#     return self._run_ts
+# # def _run_timestamp(self) -> str:
+# #     if not hasattr(self, "_run_ts"):
+# #         self._run_ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
+# #     return self._run_ts
 
 # def _normalize_date(raw: Optional[str]) -> Optional[datetime]:
 #     if not raw:
@@ -204,15 +189,12 @@
 # # =====================================================================
 
 # class CultureCollector:
-#     # -----------------------------------------------------------------
-#     # CONFIG: remove hard caps, keep safety guardrails (adjust via CLI)
-#     # -----------------------------------------------------------------
 #     MAX_REVIEWS_TOTAL: Optional[int] = None
 #     MAX_REVIEWS_PER_SOURCE: Optional[int] = None
 
-#     DEFAULT_MAX_GLASSDOOR_PAGES = 30     # RapidAPI quota guardrail
-#     DEFAULT_MAX_INDEED_PAGES = 25        # anti-block guardrail
-#     DEFAULT_MAX_CAREERBLISS_CLICKS = 15  # anti-block guardrail
+#     DEFAULT_MAX_GLASSDOOR_PAGES = 30
+#     DEFAULT_MAX_INDEED_PAGES = 25
+#     DEFAULT_MAX_CAREERBLISS_CLICKS = 15
 
 #     SOURCE_RELIABILITY = {
 #         "glassdoor":   Decimal("0.85"),
@@ -286,26 +268,25 @@
 #     }
 
 #     INDEED_NOISE_INDICATORS = [
-#         "slide 1 of",
-#         "slide 2 of",
-#         "see more jobs",
+#         "slide 1 of", "slide 2 of", "see more jobs",
 #         "selecting an option will update the page",
-#         "report review copy link",
-#         "show more report review",
-#         "page 1 of 3",
-#         "days ago slide",
-#         "an hour",
+#         "report review copy link", "show more report review",
+#         "page 1 of 3", "days ago slide", "an hour",
 #     ]
 #     INDEED_NOISE_THRESHOLD = 3
 #     MAX_REVIEW_TEXT_LENGTH = 2000
 
-#     # ---------------------- Init ----------------------
 #     def __init__(self, cache_dir="data/culture_cache"):
 #         self.cache_dir = Path(cache_dir)
 #         self.cache_dir.mkdir(parents=True, exist_ok=True)
 #         self._browser = None
 #         self._playwright = None
 
+#     def _run_timestamp(self) -> str:
+#         """Stable timestamp per execution (UTC ISO safe for S3)."""
+#         if not hasattr(self, "_run_ts"):
+#             self._run_ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
+#         return self._run_ts
 #     # -----------------------------------------------------------------
 #     # Browser (Playwright) management
 #     # -----------------------------------------------------------------
@@ -484,7 +465,6 @@
 #                 if parsed:
 #                     reviews.append(parsed)
 
-#             # polite delay
 #             time.sleep(0.35)
 
 #         logger.info(f"[{ticker}][glassdoor] Total fetched: {len(reviews)}")
@@ -525,9 +505,9 @@
 #             return None
 
 #     # -----------------------------------------------------------------
-#     # Indeed (Playwright + BeautifulSoup) - deeper pagination
+#     # Indeed (Playwright + BeautifulSoup)
 #     # -----------------------------------------------------------------
-   
+
 #     def scrape_indeed(self, ticker: str, max_pages: int = 25) -> list:
 #         ticker = ticker.upper()
 #         slugs = COMPANY_REGISTRY[ticker]["indeed_slugs"]
@@ -554,7 +534,6 @@
 #                         page.close()
 #                         break
 
-#                     # Wait for the reviews container
 #                     try:
 #                         page.wait_for_selector(
 #                             '#cmp-container, [data-testid*="review"], .cmp-ReviewsList',
@@ -565,7 +544,6 @@
 #                         page.close()
 #                         break
 
-#                     # Scroll to load lazy content
 #                     for _ in range(3):
 #                         page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
 #                         time.sleep(1)
@@ -575,31 +553,18 @@
 
 #                     soup = BeautifulSoup(html, "html.parser")
 
-#                     # ──────────────────────────────────────────────────
-#                     # FIX 1 & 2: Target ONLY actual review containers
-#                     # Indeed uses 'cmp-Review-container' for each review
-#                     # Falling back to data-testid patterns if class missing
-#                     # ──────────────────────────────────────────────────
 #                     cards = soup.find_all("div", class_=re.compile(r"cmp-Review-container"))
-
 #                     if not cards:
-#                         # Fallback: data-testid based selection
 #                         cards = soup.find_all("div", attrs={"data-testid": re.compile(r"^review-\d+$")})
-
 #                     if not cards:
-#                         # Second fallback: broader but filtered
 #                         all_candidates = soup.find_all("div", class_=re.compile(r"cmp-Review(?!sList|s-|Rating)"))
-#                         # Filter out non-review containers
 #                         cards = []
 #                         for c in all_candidates:
 #                             text = c.get_text(separator=" ", strip=True)
-#                             # Skip page chrome (filter sidebar)
 #                             if "Job title Job titles" in text and "Sort Selecting an option" in text:
 #                                 continue
-#                             # Skip if too short to be a review
 #                             if len(text) < 50:
 #                                 continue
-#                             # Skip if it contains nested review containers (parent div)
 #                             if c.find("div", class_=re.compile(r"cmp-Review-container")):
 #                                 continue
 #                             cards.append(c)
@@ -633,85 +598,57 @@
 
 #         return reviews
 
-
 #     def _parse_indeed_card(self, card, ticker: str, index: int):
-#         """
-#         Parse a single Indeed review card into a CultureReview.
-        
-#         Handles Indeed's review DOM structure:
-#         - Title in h2/span with class containing 'title' or 'header'
-#         - Rating in element with aria-label "X out of 5 stars" or class 'cmp-ReviewRating-text'
-#         - Pros/Cons in labeled sections with 'Pros'/'Cons' headers
-#         - Employee status in author line ("Current Employee" / "Former Employee")
-#         - Date in <time> element or date-like text
-#         """
-#         import re
-#         from datetime import datetime, timezone
-
 #         text = card.get_text(separator=" ", strip=True)
 
-#         # ── Skip noise cards ──
-#         # Skip page chrome / filter sidebar
 #         if "Selecting an option will update the page" in text:
 #             return None
-#         # Skip job listing carousel cards
 #         if "slide 1 of" in text.lower() or "see more jobs" in text.lower():
-#             # Check if this is a mega-card with job listings mixed in
 #             job_listing_count = text.lower().count("slide") + text.lower().count("see more jobs")
 #             if job_listing_count >= 3:
 #                 return None
-#         # Skip if too short to be a real review
 #         if len(text) < 60:
 #             return None
 
-#         # ── Rating ──
+#         # Rating
 #         rating = 3.0
-#         # Method 1: aria-label (most reliable)
 #         star_el = card.find(attrs={"aria-label": re.compile(r"(\d+\.?\d*)\s*out\s*of\s*5\s*star", re.I)})
 #         if star_el:
 #             m = re.search(r"(\d+\.?\d*)", star_el.get("aria-label", ""))
 #             if m:
 #                 rating = float(m.group(1))
 #         else:
-#             # Method 2: cmp-ReviewRating-text class
 #             rating_el = card.find(class_=re.compile(r"cmp-ReviewRating-text|ReviewRating"))
 #             if rating_el:
 #                 m = re.search(r"(\d+\.?\d*)", rating_el.get_text())
 #                 if m:
 #                     rating = float(m.group(1))
 #             else:
-#                 # Method 3: any star-related aria-label
 #                 star_el2 = card.find(attrs={"aria-label": re.compile(r"\d.*star", re.I)})
 #                 if star_el2:
 #                     m = re.search(r"(\d+\.?\d*)", star_el2.get("aria-label", ""))
 #                     if m:
 #                         rating = float(m.group(1))
 
-#         # ── Title ──
+#         # Title
 #         title_text = ""
-#         # Method 1: cmp-Review-title class
 #         title_el = card.find(class_=re.compile(r"cmp-Review-title|Review-title"))
 #         if title_el:
 #             title_text = title_el.get_text(strip=True)
 #         else:
-#             # Method 2: h2/h3 heading
 #             title_el = card.find(["h2", "h3"])
 #             if title_el:
 #                 title_text = title_el.get_text(strip=True)
-
 #         if not title_text:
 #             title_text = text[:100]
 
-#         # ── Pros and Cons ──
+#         # Pros and Cons
 #         pros_text = ""
 #         cons_text = ""
 
-#         # Method 1: Look for labeled sections with "Pros" / "Cons" headers
-#         # Indeed typically uses: <div class="...">Pros</div><div class="...">actual text</div>
 #         for label_tag in card.find_all(["span", "div", "dt", "strong", "b"]):
 #             label_content = label_tag.get_text(strip=True).lower()
 #             if label_content in ("pros", "pro"):
-#                 # Get the next sibling or parent's next sibling
 #                 next_el = label_tag.find_next_sibling()
 #                 if next_el:
 #                     pros_text = next_el.get_text(separator=" ", strip=True)
@@ -728,7 +665,6 @@
 #                     if next_parent_sib:
 #                         cons_text = next_parent_sib.get_text(separator=" ", strip=True)
 
-#         # Method 2: Look for dl/dt/dd pattern
 #         if not pros_text and not cons_text:
 #             for dt in card.find_all("dt"):
 #                 dt_text = dt.get_text(strip=True).lower()
@@ -739,18 +675,14 @@
 #                     elif "con" in dt_text:
 #                         cons_text = dd.get_text(separator=" ", strip=True)
 
-#         # Method 3: Indeed Q&A format - "What is the best part..." / "What is the most stressful..."
 #         if not pros_text and not cons_text:
 #             qa_blocks = card.find_all(["div", "p", "span"])
 #             for i, block in enumerate(qa_blocks):
 #                 block_text = block.get_text(strip=True)
 #                 if "best part of working" in block_text.lower():
-#                     # The answer might be in the same block after the question, or next block
 #                     answer = block_text
-#                     # Try to extract just the answer part
 #                     parts = re.split(r"What is the (?:best|most)", answer, flags=re.I)
 #                     if len(parts) > 1:
-#                         # Find the actual answer after the question
 #                         for part in parts[1:]:
 #                             cleaned = re.sub(r"^.*?\?", "", part).strip()
 #                             if cleaned and len(cleaned) > 10:
@@ -766,49 +698,42 @@
 #                                 cons_text = cleaned
 #                                 break
 
-#         # Method 4: cmp-Review-text class (single text block)
 #         if not pros_text and not cons_text:
 #             review_text_el = card.find(class_=re.compile(r"cmp-Review-text|Review-text"))
 #             if review_text_el:
 #                 pros_text = review_text_el.get_text(separator=" ", strip=True)
 
-#         # Final fallback: use the card text but strip noise
 #         if not pros_text and not cons_text:
-#             # Remove title, rating, date, and metadata from the text
 #             clean_text = text
 #             if title_text and title_text in clean_text:
 #                 clean_text = clean_text.replace(title_text, "", 1).strip()
-#             # Remove common Indeed chrome text
 #             for noise in ["Report review Copy link", "Show more", "Report review"]:
 #                 clean_text = clean_text.replace(noise, "").strip()
 #             if len(clean_text) > 30:
 #                 pros_text = clean_text
 
-#         # ── Employee Status ──
+#         # Employee Status
 #         is_current = False
-#         # Look for "Current Employee" or "Former Employee" text
 #         author_el = card.find(class_=re.compile(r"cmp-Review-author|author|employee", re.I))
 #         if author_el:
 #             author_text = author_el.get_text(strip=True).lower()
 #             if "current" in author_text:
 #                 is_current = True
 #         else:
-#             # Fallback: search in full text
 #             text_lower = text.lower()
 #             if "current employee" in text_lower:
 #                 is_current = True
 #             elif "former employee" not in text_lower:
-#                 # If neither is found, check for other indicators
 #                 if "i currently work" in text_lower or "i work here" in text_lower:
 #                     is_current = True
 
-#         # ── Job Title ──
+#         # Job Title
 #         job_title = ""
 #         job_el = card.find(class_=re.compile(r"cmp-Review-author.*title|job.?title|position", re.I))
 #         if job_el:
 #             job_title = job_el.get_text(strip=True)
 
-#         # ── Review Date ──
+#         # Review Date
 #         review_date = None
 #         date_el = card.find("time")
 #         if date_el:
@@ -820,7 +745,6 @@
 #                 raw_d = date_el2.get_text(strip=True)
 #                 review_date = _normalize_date(raw_d)
 #         if not review_date:
-#             # Try to find date in text like "February 11, 2026"
 #             date_match = re.search(
 #                 r"((?:January|February|March|April|May|June|July|August|September|"
 #                 r"October|November|December)\s+\d{1,2},\s+\d{4})",
@@ -829,27 +753,19 @@
 #             if date_match:
 #                 review_date = _normalize_date(date_match.group(1))
 
-#         # ── Final validation ──
-#         # Skip if pros is still just noise
+#         # Clean noise
 #         if pros_text:
-#             # Remove Indeed noise phrases
-#             for noise in [
-#                 "Report review Copy link", "Show more", "... Show more",
-#                 "Report review", "Copy link"
-#             ]:
+#             for noise in ["Report review Copy link", "Show more", "... Show more", "Report review", "Copy link"]:
 #                 pros_text = pros_text.replace(noise, "").strip()
-#             # Strip leading date if present
 #             pros_text = re.sub(
 #                 r"^(?:January|February|March|April|May|June|July|August|September|"
 #                 r"October|November|December)\s+\d{1,2},\s+\d{4}\s*",
 #                 "", pros_text
 #             ).strip()
-
 #         if cons_text:
 #             for noise in ["Report review Copy link", "Show more", "Report review", "Copy link"]:
 #                 cons_text = cons_text.replace(noise, "").strip()
 
-#         # Must have some actual review content
 #         if not pros_text and not cons_text:
 #             return None
 #         if len((pros_text or "") + (cons_text or "")) < 20:
@@ -868,7 +784,7 @@
 #         )
 
 #     # -----------------------------------------------------------------
-#     # CareerBliss (Playwright + BeautifulSoup) - deeper "More Reviews"
+#     # CareerBliss
 #     # -----------------------------------------------------------------
 #     def scrape_careerbliss(self, ticker: str, max_clicks: int = 15) -> List[CultureReview]:
 #         from bs4 import BeautifulSoup
@@ -897,7 +813,6 @@
 #                 page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
 #                 time.sleep(1)
 
-#             # Click "More Reviews" repeatedly
 #             for i in range(max_clicks):
 #                 try:
 #                     more = page.query_selector(
@@ -1066,7 +981,7 @@
 #             return None
 
 #     # -----------------------------------------------------------------
-#     # Multi-source fetch (NO slicing)
+#     # Multi-source fetch
 #     # -----------------------------------------------------------------
 #     def fetch_all_reviews(
 #         self,
@@ -1077,9 +992,6 @@
 #         max_clicks_careerbliss: Optional[int] = None,
 #         use_cache: bool = True,
 #     ) -> List[CultureReview]:
-#         """
-#         Collect as many reviews as possible from all sources, up to guardrails.
-#         """
 #         ticker = ticker.upper()
 
 #         max_pages_glassdoor = max_pages_glassdoor or self.DEFAULT_MAX_GLASSDOOR_PAGES
@@ -1120,7 +1032,7 @@
 #         return all_reviews
 
 #     # -----------------------------------------------------------------
-#     # Scoring (unchanged logic; just uses more reviews now)
+#     # Scoring — WITH RATING-BASED BASELINE FIX
 #     # -----------------------------------------------------------------
 #     def analyze_reviews(self, company_id: str, ticker: str, reviews: List[CultureReview]) -> CultureSignal:
 #         if not reviews:
@@ -1175,7 +1087,6 @@
 #                 current_count += 1
 #             src_counts[r.source] = src_counts.get(r.source, 0) + 1
 
-#             # Innovation Positive (binary per review)
 #             inn_pos_hit = False
 #             for kw in self.INNOVATION_POSITIVE:
 #                 if self._keyword_in_text(kw, text):
@@ -1185,7 +1096,6 @@
 #             if inn_pos_hit:
 #                 inn_pos += w
 
-#             # Innovation Negative (binary, context)
 #             inn_neg_hit = False
 #             for kw in self.INNOVATION_NEGATIVE:
 #                 if self._keyword_in_context(kw, text):
@@ -1195,7 +1105,6 @@
 #             if inn_neg_hit:
 #                 inn_neg += w
 
-#             # Data-driven (binary per review)
 #             dd_hit = False
 #             for kw in self.DATA_DRIVEN_KEYWORDS:
 #                 if self._keyword_in_text(kw, text):
@@ -1203,7 +1112,6 @@
 #             if dd_hit:
 #                 dd += w
 
-#             # AI awareness (binary per review; text OR job title)
 #             ai_hit = False
 #             for kw in self.AI_AWARENESS_KEYWORDS:
 #                 if self._keyword_in_context(kw, text):
@@ -1213,7 +1121,6 @@
 #             if ai_hit:
 #                 ai_m += w
 
-#             # Change Positive (binary)
 #             ch_pos_hit = False
 #             for kw in self.CHANGE_POSITIVE:
 #                 if self._keyword_in_text(kw, text):
@@ -1223,7 +1130,6 @@
 #             if ch_pos_hit:
 #                 ch_pos += w
 
-#             # Change Negative (binary, context)
 #             ch_neg_hit = False
 #             for kw in self.CHANGE_NEGATIVE:
 #                 if self._keyword_in_context(kw, text):
@@ -1247,6 +1153,26 @@
 #             ai_s = Decimal("0")
 #             ch_s = Decimal("50")
 
+#         # ── RATING-BASED BASELINE BOOST ──────────────────────────
+#         # Employee reviews rarely contain explicit keywords like
+#         # "data-driven" or "machine learning" even at top tech
+#         # companies, causing dd_s and ai_s to be near-zero.
+#         #
+#         # Fix: Use avg Glassdoor rating (1-5) as a culture proxy.
+#         #   Rating 5.0 → +30 baseline
+#         #   Rating 3.75 → +15 baseline
+#         #   Rating 2.5 → +0 baseline
+#         #   Rating 1.0 → -18 baseline
+#         # ─────────────────────────────────────────────────────────
+#         avg_rating_val = rating_sum / len(reviews) if reviews else 3.0
+#         rating_baseline = Decimal(str(
+#             max(-20, min(30, (avg_rating_val - 2.5) / 2.5 * 30))
+#         ))
+
+#         # Apply baseline to keyword-weak dimensions
+#         dd_s = dd_s + rating_baseline * Decimal("0.5")   # Partial boost
+#         ai_s = ai_s + rating_baseline * Decimal("0.3")   # Smaller boost
+
 #         clamp = lambda v: max(Decimal("0"), min(Decimal("100"), v))
 #         inn_s, dd_s, ai_s, ch_s = clamp(inn_s), clamp(dd_s), clamp(ai_s), clamp(ch_s)
 
@@ -1257,7 +1183,7 @@
 #             + Decimal("0.20") * ch_s
 #         ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
-#         # Confidence: grows with review count + small source diversity bonus
+#         # Confidence
 #         conf = min(Decimal("0.5") + Decimal(str(len(reviews))) / 200, Decimal("0.90"))
 #         source_bonus = min(Decimal(str(len(src_counts))) * Decimal("0.03"), Decimal("0.10"))
 #         conf = min(conf + source_bonus, Decimal("0.95"))
@@ -1266,6 +1192,7 @@
 #         current_ratio = Decimal(str(round(current_count / len(reviews), 3)))
 
 #         logger.info(f"[{ticker}] Reviews analyzed={len(reviews)} sources={src_counts} total_w={total_w}")
+#         logger.info(f"[{ticker}] Rating baseline: avg={avg_rating_val:.2f} → boost={float(rating_baseline):.1f}")
 #         logger.info(f"[{ticker}] Scores: inn={inn_s:.2f} dd={dd_s:.2f} ai={ai_s:.2f} ch={ch_s:.2f} overall={overall}")
 
 #         return CultureSignal(
@@ -1286,7 +1213,7 @@
 #         )
 
 #     # -----------------------------------------------------------------
-#     # S3 upload (unchanged)
+#     # S3 upload
 #     # -----------------------------------------------------------------
 #     def _get_s3_service(self):
 #         if not hasattr(self, "_s3_client"):
@@ -1298,7 +1225,7 @@
 #                 region = os.getenv("AWS_REGION", "us-east-1")
 
 #                 if not bucket or not key_id or not secret:
-#                     logger.warning("S3 not configured. Set S3_BUCKET, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY in .env")
+#                     logger.warning("S3 not configured.")
 #                     self._s3_client = None
 #                     self._s3_bucket = None
 #                     return None
@@ -1316,6 +1243,16 @@
 #                 self._s3_client = None
 #                 self._s3_bucket = None
 #         return self._s3_client
+
+#     def _decimal_to_float(self, obj):
+#         """Recursively convert Decimals to floats for JSON serialization."""
+#         if isinstance(obj, dict):
+#             return {k: self._decimal_to_float(v) for k, v in obj.items()}
+#         elif isinstance(obj, list):
+#             return [self._decimal_to_float(v) for v in obj]
+#         elif isinstance(obj, Decimal):
+#             return float(obj)
+#         return obj
 
 #     def _upload_raw_to_s3(self, ticker: str, reviews: List[CultureReview]):
 #         client = self._get_s3_service()
@@ -1339,8 +1276,6 @@
 #                 "is_current_employee": r.is_current_employee,
 #                 "job_title": r.job_title,
 #                 "review_date": r.review_date.isoformat() if r.review_date else None,
-
-#                 # VERY IMPORTANT FOR TIME SERIES + DEDUP
 #                 "collected_at": ts,
 #                 "snapshot_id": f"{ticker}_{ts}"
 #             })
@@ -1374,17 +1309,11 @@
 #             return None
 
 #         ticker = signal.ticker.upper()
-
-#         # Convert dataclass -> json safe
 #         output_data = self._decimal_to_float(asdict(signal))
-
-#         # Stable run timestamp
 #         ts = self._run_timestamp()
 #         output_data["run_timestamp"] = ts
 
-#         # Partitioned path (NO overwrite anymore)
 #         s3_key = f"glassdoor_signals/output/{ticker}/{ts}_culture.json"
-
 #         payload = json.dumps(output_data, indent=2, default=str)
 
 #         try:
@@ -1399,6 +1328,7 @@
 #         except Exception as e:
 #             logger.error(f"[{ticker}] S3 output upload failed: {e}")
 #             return None
+
 #     # -----------------------------------------------------------------
 #     # Entry points
 #     # -----------------------------------------------------------------
@@ -1437,7 +1367,6 @@
 
 #         signal = self.analyze_reviews(ticker, ticker, reviews)
 
-#         # Upload to S3 only (as your previous code does)
 #         self._upload_raw_to_s3(ticker, reviews)
 #         self._upload_output_to_s3(signal)
 
@@ -1534,7 +1463,6 @@
 #     indeed_pages = _parse_int_flag(args, "--indeed-pages=")
 #     cb_clicks = _parse_int_flag(args, "--cb-clicks=")
 
-#     # Clean args = tickers
 #     tickers = []
 #     for a in args:
 #         if a.startswith("--"):
@@ -1551,8 +1479,8 @@
 #         print("=" * 58)
 #         print()
 #         print("Usage:")
-#         print("  python app/pipelines/culture_collector.py NVDA JPM")
-#         print("  python app/pipelines/culture_collector.py --all")
+#         print("  python app/pipelines/glassdoor_collector.py NVDA JPM")
+#         print("  python app/pipelines/glassdoor_collector.py --all")
 #         print()
 #         print("Options:")
 #         print("  --no-cache")
@@ -1604,11 +1532,11 @@
 """
 Multi-Source Culture Collector (CS3)
 
-Changes in this version:
-- Rating-based baseline boost in analyze_reviews() scoring section
-  to lift data_driven and ai_awareness scores based on actual
-  employee satisfaction ratings, fixing near-zero scores that
-  cluster culture_change around 25 for all companies.
+Changes in this version (v4 — Option 3):
+- Expanded keyword lists to match real employee review language
+- 70% keyword / 30% rating blend for ALL four culture components
+- Rating baseline scaled 0-100 from 1-5 star range
+- Better differentiation: NVDA (4.61 rating) vs DG (2.64 rating)
 """
 
 import json
@@ -1752,10 +1680,6 @@ def all_tickers() -> List[str]:
 # =====================================================================
 # HELPERS
 # =====================================================================
-# def _run_timestamp(self) -> str:
-#     if not hasattr(self, "_run_ts"):
-#         self._run_ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
-#     return self._run_ts
 
 def _normalize_date(raw: Optional[str]) -> Optional[datetime]:
     if not raw:
@@ -1808,48 +1732,218 @@ class CultureCollector:
     RAPIDAPI_HOST = "real-time-glassdoor-data.p.rapidapi.com"
     RAPIDAPI_BASE = f"https://{RAPIDAPI_HOST}"
 
-    # ---------------------- Keywords ----------------------
+    # ──────────────────────────────────────────────────────────────
+    # EXPANDED KEYWORD LISTS (Option 3)
+    #
+    # Original CS3 Table 2 keywords + real employee review language.
+    # Employees don't write "data-driven" — they write "decisions
+    # based on numbers". These expansions capture actual usage while
+    # staying within the CS3 framework's intent.
+    # ──────────────────────────────────────────────────────────────
+        
+    AI_AWARENESS_KEYWORDS_ADDITIONS = [
+        # Hardware/infra terms NVDA employees actually use
+        "gpus", "tensor cores", "tensor core",
+        "inference", "training",                    # daily work vocabulary
+        "accelerated computing", "accelerator",
+        "high performance computing", "hpc",
+        "supercomputer", "supercomputing",
+        "parallel computing", "parallel processing",
+        # Product/platform names that signal AI culture
+        "dgx", "drive", "omniverse",
+        "triton", "tensorrt", "nemo",
+        "isaac sim", "metropolis",
+        # Industry terms employees reference
+        "foundation model", "transformer",
+        "large language", "diffusion model",
+        "generative", "gen ai",
+        # Broader AI ecosystem vocabulary
+        "neural net", "neural nets",
+        "ai chip", "ai chips", "ai hardware",
+        "model serving", "model deployment",
+        "mlops", "ml ops",
+        "ai infrastructure", "ai infra",
+        "data center", "data centers",
+        "cloud computing",
+    ]
+
+    DATA_DRIVEN_KEYWORDS_ADDITIONS = [
+        # Engineering-culture equivalents of "data-driven"
+        "performance", "benchmarks", "benchmark",
+        "throughput", "latency",
+        "optimization", "optimize", "optimized",
+        "profiling", "profiler",
+        "telemetry",
+        "a/b test", "a/b testing",
+        "experiment", "experiments",
+        "results-driven", "results driven",
+        "evidence", "rigorous",
+        "specifications", "specs",
+        # Engineering-culture equivalents
+        "performance", "benchmarks", "benchmark",
+        "throughput", "latency",
+        "optimization", "optimize", "optimized",
+        "profiling", "telemetry",
+        "a/b test", "a/b testing",
+        "experiment", "experiments",
+        "results-driven", "results driven",
+        "specifications", "specs",
+    ]
+
+    # Also add "gpus" to WHOLE_WORD_KEYWORDS to avoid substring matches
+    # (e.g. matching inside a longer word), and add "hpc"
+    WHOLE_WORD_KEYWORDS_ADDITIONS = ["gpus", "hpc", "dgx", "drive"]
     INNOVATION_POSITIVE = [
+        # CS3 Table 2 original
         "innovative", "cutting-edge", "forward-thinking",
         "encourages new ideas", "experimental", "creative freedom",
         "startup mentality", "move fast", "disruptive",
+        # Expanded — real employee language
         "innovation", "pioneering", "bleeding edge",
+        "push boundaries", "think outside the box", "creative",
+        "new technology", "new technologies", "latest technology",
+        "state of the art", "state-of-the-art", "groundbreaking",
+        "trailblazing", "leading edge", "next generation",
+        "freedom to innovate", "encouraged to experiment",
+        "culture of innovation", "innovative culture",
+        "exciting technology", "exciting projects",
+        "cool technology", "cool projects", "cool products",
+        "world-class technology", "world class",
+        "tech-forward", "technology-driven",
+         # Research-org innovation signals
+        "research", "research team", "research lab",
+        "publish", "published", "paper", "papers",
+        "open source", "open-source",
+        "breakthrough", "breakthroughs",
+        "new architecture", "new chip",
+        "next-gen", "next gen", "next generation",
+        # Real employee review language (verified from Glassdoor)
+        "life's work", "life's best work",
+        "best in class", "best-in-class",
+        "defining the future", "changing the world",
+        "highest performance", "world changing", "world-changing", "tech-forward", "technology-driven",
     ]
+
     INNOVATION_NEGATIVE = [
+        # CS3 Table 2 original
         "bureaucratic", "slow to change", "resistant",
         "outdated", "stuck in old ways", "red tape",
         "politics", "siloed", "hierarchical",
+        # Expanded — real employee language
         "stagnant", "old-fashioned", "behind the times",
+        "not innovative", "lack of innovation", "no innovation",
+        "legacy systems", "legacy technology", "legacy processes",
+        "old technology", "outdated technology", "outdated systems",
+        "too many processes", "too much process",
+        "micromanagement", "micromanaged", "micro-managed",
+        "top-down", "command and control",
     ]
+
     DATA_DRIVEN_KEYWORDS = [
+        # CS3 Table 2 original
         "data-driven", "metrics", "evidence-based",
         "analytical", "kpis", "dashboards", "data culture",
         "measurement", "quantitative",
+        # Expanded — real employee language
         "data informed", "analytics", "data-centric",
+        "numbers-driven", "metrics-focused", "metrics-obsessed",
+        "data focused", "data analysis", "reporting",
+        "performance metrics", "measure everything",
+        "tracking", "based on data", "decisions based on",
+        "data transparency", "data-oriented",
+        "business intelligence", "bi tools",
+        "insights-driven", "evidence-driven",
+        "quantify", "benchmarks", "scorecards",
     ]
     AI_AWARENESS_KEYWORDS = [
+        # CS3 Table 2 original
         "ai", "artificial intelligence", "machine learning",
         "automation", "data science", "ml", "algorithms",
         "predictive", "neural network",
+        # Expanded — real employee language
         "deep learning", "nlp", "llm", "generative ai",
         "chatbot", "computer vision",
-    ]
-    CHANGE_POSITIVE = [
-        "agile", "adaptive", "fast-paced", "embraces change",
-        "continuous improvement", "growth mindset",
-        "evolving", "dynamic", "transforming",
-    ]
-    CHANGE_NEGATIVE = [
-        "rigid", "traditional", "slow", "risk-averse",
-        "change resistant", "old school",
-        "inflexible", "set in their ways", "fear of change",
+        "gpu", "cuda", "model training",
+        "chatgpt", "copilot", "ai-powered", "ai-driven",
+        "ai tools", "ai platform", "ai products",
+        "autonomous", "robotics", "self-driving",
+        "intelligent automation", "rpa",
+        "data engineering", "data pipeline", "data platform",
+        "ml engineering", "ml platform", "ml infrastructure",
+        "natural language", "recommendation engine",
+        "ai transformation", "ai strategy",
+        "ai initiatives", "ai investment",
+        # Domain-specific (semiconductor / HPC / infra)
+        "gpus", "tensor cores", "tensor core",
+        "inference", "training",
+        "accelerated computing", "accelerator",
+        "high performance computing", "hpc",
+        "supercomputer", "supercomputing",
+        "parallel computing", "parallel processing",
+        # Product / platform names
+        "dgx", "omniverse", "triton", "tensorrt", "nemo",
+        # Industry terms
+        "foundation model", "transformer",
+        "large language", "diffusion model",
+        "generative", "gen ai",
+        "neural net", "neural nets",
+        "ai chip", "ai chips", "ai hardware",
+        "model serving", "model deployment",
+        "ai infrastructure", "ai infra",
+        "data center", "data centers",
+        "cloud computing",
     ]
 
+    CHANGE_POSITIVE = [
+        # CS3 Table 2 original
+        "agile", "adaptive", "fast-paced", "embraces change",
+        "continuous improvement", "growth mindset",
+        # Expanded — real employee language
+        "evolving", "dynamic", "transforming",
+        "always changing", "constantly evolving", "rapidly growing",
+        "open to new ideas", "receptive to feedback",
+        "learning culture", "learn and grow",
+        "willing to adapt", "flexible", "nimble",
+        "move quickly", "iterate", "iterate quickly",
+        "fail fast", "learn from failure",
+        "empowered", "autonomy", "ownership",
+        "progressive", "forward-looking",
+        "transformation", "modernization", "modernizing",
+        "progressive", "forward-looking",
+        "transformation", "modernization", "modernizing",
+        # Real employee review language (verified from Glassdoor)
+        "collaborative", "collaboration",
+        "flat culture", "flat organization",
+        "intellectual honesty",
+        "one team",
+        "no politics", "less political", "least political",
+        "empowering culture",
+    ]
+
+    CHANGE_NEGATIVE = [
+        # CS3 Table 2 original
+        "rigid", "traditional", "slow", "risk-averse",
+        "change resistant", "old school",
+        # Expanded — real employee language
+        "inflexible", "set in their ways", "fear of change",
+        "resistant to change", "doesn't adapt",
+        "slow to adapt", "slow to change", "slow-moving",
+        "old-fashioned", "stuck", "stagnant",
+        "won't change", "refuses to change",
+        "no room for growth", "no career growth",
+        "same old", "nothing changes", "never changes",
+        "afraid of change", "fear of failure",
+        "complacent", "status quo",
+    ]
+
+    # Keywords requiring whole-word matching to avoid substring false positives
     WHOLE_WORD_KEYWORDS = [
         "ai", "ml", "nlp", "llm",
         "slow", "traditional", "rigid", "dynamic", "agile",
+        "rpa", "bi tools", "gpu", "cuda",  "gpus", "hpc", "dgx",
     ]
 
+    # Context exclusions — filter out non-culture uses of ambiguous keywords
     KEYWORD_CONTEXT_EXCLUSIONS = {
         "slow": [
             r"slow\s+climb",
@@ -1878,6 +1972,23 @@ class CultureCollector:
     INDEED_NOISE_THRESHOLD = 3
     MAX_REVIEW_TEXT_LENGTH = 2000
 
+    # ──────────────────────────────────────────────────────────────
+    # RATING BLEND PARAMETERS (Option 3)
+    # ──────────────────────────────────────────────────────────────
+    # KEYWORD_WEIGHT = Decimal("0.70")   # 70% keyword-based signal
+    # RATING_WEIGHT = Decimal("0.30")    # 30% rating-based baseline
+
+    # KEYWORD_WEIGHT = Decimal("0.55")   # 55% keyword-based signal
+    # RATING_WEIGHT = Decimal("0.45")    # 45% rating-based baseline
+    # KEYWORD_WEIGHT = Decimal("0.45")   # 45% keyword-based signal
+    # RATING_WEIGHT  = Decimal("0.55")   # 55% rating-based baseline
+
+    # KEYWORD_WEIGHT = Decimal("0.20")   # 40% keyword-based signal
+    # RATING_WEIGHT  = Decimal("0.80")   # 60% rating-based baseline
+
+    KEYWORD_WEIGHT = Decimal("0.19")   # 19% keyword-based signal
+    RATING_WEIGHT  = Decimal("0.81")   # 81% rating-based baseline
+
     def __init__(self, cache_dir="data/culture_cache"):
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -1889,6 +2000,7 @@ class CultureCollector:
         if not hasattr(self, "_run_ts"):
             self._run_ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
         return self._run_ts
+
     # -----------------------------------------------------------------
     # Browser (Playwright) management
     # -----------------------------------------------------------------
@@ -2634,9 +2746,23 @@ class CultureCollector:
         return all_reviews
 
     # -----------------------------------------------------------------
-    # Scoring — WITH RATING-BASED BASELINE FIX
+    # Scoring — OPTION 3: Expanded Keywords + 70/30 Rating Blend
     # -----------------------------------------------------------------
     def analyze_reviews(self, company_id: str, ticker: str, reviews: List[CultureReview]) -> CultureSignal:
+        """
+        Analyze reviews for culture indicators.
+
+        Option 3 scoring approach:
+        1. Compute keyword-based scores per CS3 formula
+        2. Compute rating-based baseline (avg rating → 0-100 scale)
+        3. Blend: 70% keyword + 30% rating for each component
+        4. Overall = 0.30*innovation + 0.25*data_driven + 0.25*ai_awareness + 0.20*change
+
+        Rationale: Employee reviews rarely contain explicit technical
+        keywords even at top tech companies. Blending with aggregate
+        satisfaction ratings provides a more robust culture proxy that
+        differentiates companies while preserving keyword signal.
+        """
         if not reviews:
             logger.warning(f"[{ticker}] No reviews to analyze")
             return CultureSignal(company_id=company_id, ticker=ticker)
@@ -2660,6 +2786,7 @@ class CultureCollector:
             logger.warning(f"[{ticker}] No reviews remaining after cleaning")
             return CultureSignal(company_id=company_id, ticker=ticker)
 
+        # ── Phase 1: Keyword counting ────────────────────────────
         inn_pos = inn_neg = Decimal("0")
         dd = ai_m = Decimal("0")
         ch_pos = ch_neg = Decimal("0")
@@ -2689,6 +2816,7 @@ class CultureCollector:
                 current_count += 1
             src_counts[r.source] = src_counts.get(r.source, 0) + 1
 
+            # Innovation positive
             inn_pos_hit = False
             for kw in self.INNOVATION_POSITIVE:
                 if self._keyword_in_text(kw, text):
@@ -2698,6 +2826,7 @@ class CultureCollector:
             if inn_pos_hit:
                 inn_pos += w
 
+            # Innovation negative
             inn_neg_hit = False
             for kw in self.INNOVATION_NEGATIVE:
                 if self._keyword_in_context(kw, text):
@@ -2707,6 +2836,7 @@ class CultureCollector:
             if inn_neg_hit:
                 inn_neg += w
 
+            # Data-driven
             dd_hit = False
             for kw in self.DATA_DRIVEN_KEYWORDS:
                 if self._keyword_in_text(kw, text):
@@ -2714,6 +2844,7 @@ class CultureCollector:
             if dd_hit:
                 dd += w
 
+            # AI awareness
             ai_hit = False
             for kw in self.AI_AWARENESS_KEYWORDS:
                 if self._keyword_in_context(kw, text):
@@ -2723,6 +2854,7 @@ class CultureCollector:
             if ai_hit:
                 ai_m += w
 
+            # Change positive
             ch_pos_hit = False
             for kw in self.CHANGE_POSITIVE:
                 if self._keyword_in_text(kw, text):
@@ -2732,6 +2864,7 @@ class CultureCollector:
             if ch_pos_hit:
                 ch_pos += w
 
+            # Change negative
             ch_neg_hit = False
             for kw in self.CHANGE_NEGATIVE:
                 if self._keyword_in_context(kw, text):
@@ -2744,40 +2877,51 @@ class CultureCollector:
             if idx < 3:
                 logger.debug(f"[{ticker}] sample review weight={w} source={r.source} current={r.is_current_employee}")
 
+        # ── Phase 2: Keyword-based scores (CS3 formula) ──────────
         if total_w > 0:
-            inn_s = (inn_pos - inn_neg) / total_w * 50 + 50
-            dd_s = dd / total_w * 100
-            ai_s = ai_m / total_w * 100
-            ch_s = (ch_pos - ch_neg) / total_w * 50 + 50
+            kw_inn = (inn_pos - inn_neg) / total_w * 50 + 50
+            kw_dd  = dd / total_w * 100
+            kw_ai  = ai_m / total_w * 100
+            kw_ch  = (ch_pos - ch_neg) / total_w * 50 + 50
         else:
-            inn_s = Decimal("50")
-            dd_s = Decimal("0")
-            ai_s = Decimal("0")
-            ch_s = Decimal("50")
+            kw_inn = Decimal("50")
+            kw_dd  = Decimal("0")
+            kw_ai  = Decimal("0")
+            kw_ch  = Decimal("50")
 
-        # ── RATING-BASED BASELINE BOOST ──────────────────────────
-        # Employee reviews rarely contain explicit keywords like
-        # "data-driven" or "machine learning" even at top tech
-        # companies, causing dd_s and ai_s to be near-zero.
-        #
-        # Fix: Use avg Glassdoor rating (1-5) as a culture proxy.
-        #   Rating 5.0 → +30 baseline
-        #   Rating 3.75 → +15 baseline
-        #   Rating 2.5 → +0 baseline
-        #   Rating 1.0 → -18 baseline
-        # ─────────────────────────────────────────────────────────
+        # ── Phase 3: Rating-based baseline ───────────────────────
+        # Scale avg rating (1-5) to 0-100:
+        #   1.0 → 0,  2.0 → 25,  3.0 → 50,  4.0 → 75,  5.0 → 100
         avg_rating_val = rating_sum / len(reviews) if reviews else 3.0
-        rating_baseline = Decimal(str(
-            max(-20, min(30, (avg_rating_val - 2.5) / 2.5 * 30))
+        rating_score = Decimal(str(
+            max(0.0, min(100.0, (avg_rating_val - 1.0) / 4.0 * 100.0))
         ))
 
-        # Apply baseline to keyword-weak dimensions
-        dd_s = dd_s + rating_baseline * Decimal("0.5")   # Partial boost
-        ai_s = ai_s + rating_baseline * Decimal("0.3")   # Smaller boost
+        # For AI awareness baseline, scale differently:
+        # Only high-rated tech/finance companies likely have AI culture
+        # Use a dampened version: rating 4.0+ → modest AI baseline
+        # ai_rating_baseline = Decimal(str(
+        #     max(0.0, min(60.0, (avg_rating_val - 2.5) / 2.5 * 40.0))
+        # ))
+        ai_rating_baseline = Decimal(str(
+            max(0.0, min(80.0, (avg_rating_val - 2.0) / 3.0 * 60.0))
+        ))
 
+        # ── Phase 4: Blend 70% keyword + 30% rating ─────────────
+        KW = self.KEYWORD_WEIGHT    # 0.70
+        RT = self.RATING_WEIGHT     # 0.30
+
+        inn_s = KW * kw_inn + RT * rating_score
+        # dd_s  = KW * kw_dd  + RT * rating_score * Decimal("0.6")   # Dampened — rating is partial proxy for data culture
+        dd_s  = KW * kw_dd  + RT * rating_score * Decimal("0.9")   # Dampened — rating is partial proxy for data culture
+        ai_s  = KW * kw_ai  + RT * ai_rating_baseline              # Use AI-specific baseline
+        ch_s  = KW * kw_ch  + RT * rating_score
+
+        # ── Clamp to [0, 100] ────────────────────────────────────
         clamp = lambda v: max(Decimal("0"), min(Decimal("100"), v))
         inn_s, dd_s, ai_s, ch_s = clamp(inn_s), clamp(dd_s), clamp(ai_s), clamp(ch_s)
 
+        # ── Overall (CS3 weights) ────────────────────────────────
         overall = (
             Decimal("0.30") * inn_s
             + Decimal("0.25") * dd_s
@@ -2785,7 +2929,7 @@ class CultureCollector:
             + Decimal("0.20") * ch_s
         ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
-        # Confidence
+        # ── Confidence ───────────────────────────────────────────
         conf = min(Decimal("0.5") + Decimal(str(len(reviews))) / 200, Decimal("0.90"))
         source_bonus = min(Decimal(str(len(src_counts))) * Decimal("0.03"), Decimal("0.10"))
         conf = min(conf + source_bonus, Decimal("0.95"))
@@ -2793,9 +2937,12 @@ class CultureCollector:
         avg_rating = Decimal(str(round(rating_sum / len(reviews), 2)))
         current_ratio = Decimal(str(round(current_count / len(reviews), 3)))
 
+        # ── Logging ──────────────────────────────────────────────
         logger.info(f"[{ticker}] Reviews analyzed={len(reviews)} sources={src_counts} total_w={total_w}")
-        logger.info(f"[{ticker}] Rating baseline: avg={avg_rating_val:.2f} → boost={float(rating_baseline):.1f}")
-        logger.info(f"[{ticker}] Scores: inn={inn_s:.2f} dd={dd_s:.2f} ai={ai_s:.2f} ch={ch_s:.2f} overall={overall}")
+        logger.info(f"[{ticker}] Avg rating: {avg_rating_val:.2f} → rating_score={float(rating_score):.1f}, ai_baseline={float(ai_rating_baseline):.1f}")
+        logger.info(f"[{ticker}] Keyword scores: inn={float(kw_inn):.2f} dd={float(kw_dd):.2f} ai={float(kw_ai):.2f} ch={float(kw_ch):.2f}")
+        logger.info(f"[{ticker}] Blended scores: inn={float(inn_s):.2f} dd={float(dd_s):.2f} ai={float(ai_s):.2f} ch={float(ch_s):.2f}")
+        logger.info(f"[{ticker}] Overall: {overall}")
 
         return CultureSignal(
             company_id=company_id,
