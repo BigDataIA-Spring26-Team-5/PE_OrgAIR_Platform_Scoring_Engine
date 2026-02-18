@@ -257,9 +257,10 @@ async def score_portfolio_pf():
         results.append(result)
         if result.status == "success":
             scored += 1
+            _save_pf_result(result)
         else:
             failed += 1
-    
+
     # Build summary table
     summary = []
     logger.info("")
@@ -328,13 +329,14 @@ async def score_portfolio_pf():
     summary="Calculate Position Factor for one company",
     description="""
     Runs Task 6.0a (Position Factor) for a single ticker.
-    
+
     Pipeline:
     1. Get VR score from TC+VR endpoint (Task 5.2)
     2. Get market cap percentile (manual input from config)
     3. Calculate PF = 0.6 × VR_component + 0.4 × MCap_component
     4. Validate against CS3 Table 5 expected range
-    
+    5. Save result to S3 and upsert PF into Snowflake SCORING table
+
     Position Factor interpretation:
     - PF > +0.7: Dominant leader
     - PF +0.3 to +0.7: Strong player
@@ -343,8 +345,11 @@ async def score_portfolio_pf():
     """,
 )
 async def score_pf(ticker: str):
-    """Calculate Position Factor for one company."""
-    return _compute_position_factor(ticker.upper())
+    """Calculate Position Factor for one company. Saves to S3 + Snowflake SCORING table."""
+    result = _compute_position_factor(ticker.upper())
+    if result.status == "success":
+        _save_pf_result(result)
+    return result
 
 
 # =====================================================================
@@ -504,3 +509,229 @@ async def download_pf_report():
             "Content-Length": str(len(md_content.encode("utf-8"))),
         },
     )
+
+
+# =====================================================================
+# Snowflake + S3 persistence helpers
+# =====================================================================
+
+def _save_pf_result(result: PFResponse) -> None:
+    """Save PF result to S3 JSON and upsert into Snowflake SCORING and PF_SCORING tables."""
+    ticker = result.ticker
+    try:
+        from app.services.s3_storage import get_s3_service
+        s3 = get_s3_service()
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        s3_key = f"scoring/pf/{ticker}/{ts}.json"
+        s3.upload_json(result.model_dump(), s3_key)
+        logger.info(f"[{ticker}] PF result saved to S3: {s3_key}")
+    except Exception as e:
+        logger.warning(f"[{ticker}] S3 save failed (non-fatal): {e}")
+
+    try:
+        _upsert_scoring_pf(ticker, pf=result.position_factor)
+        logger.info(f"[{ticker}] SCORING table upserted: PF={result.position_factor}")
+    except Exception as e:
+        logger.warning(f"[{ticker}] Snowflake SCORING upsert failed (non-fatal): {e}")
+
+    # PF_SCORING — breakdown detail table
+    try:
+        _upsert_pf_scoring(result)
+        logger.info(f"[{ticker}] PF_SCORING table upserted")
+    except Exception as e:
+        logger.warning(f"[{ticker}] PF_SCORING upsert failed (non-fatal): {e}")
+
+
+def _upsert_pf_scoring(result: PFResponse) -> None:
+    """MERGE all PF sub-components into PF_SCORING."""
+    from app.services.snowflake import get_snowflake_connection
+    ticker = result.ticker
+    bd  = result.pf_breakdown
+    val = result.validation
+
+    position_factor       = result.position_factor
+    vr_score_used         = bd.vr_score          if bd else None
+    sector                = COMPANY_SECTORS.get(ticker.upper())
+    sector_avg_vr         = bd.sector_avg_vr     if bd else None
+    vr_diff               = bd.vr_diff           if bd else None
+    vr_component          = bd.vr_component      if bd else None
+    market_cap_percentile = bd.market_cap_percentile if bd else None
+    mcap_component        = bd.mcap_component    if bd else None
+    pf_in_range           = val.pf_in_range      if val else None
+    pf_expected           = val.pf_expected      if val else None
+
+    conn = get_snowflake_connection()
+    try:
+        cursor = conn.cursor()
+        sql = """
+            MERGE INTO PF_SCORING AS tgt
+            USING (SELECT %s AS ticker) AS src
+            ON tgt.ticker = src.ticker
+            WHEN MATCHED THEN UPDATE SET
+                position_factor       = %s,
+                vr_score_used         = %s,
+                sector                = %s,
+                sector_avg_vr         = %s,
+                vr_diff               = %s,
+                vr_component          = %s,
+                market_cap_percentile = %s,
+                mcap_component        = %s,
+                pf_in_range           = %s,
+                pf_expected           = %s,
+                updated_at            = CURRENT_TIMESTAMP()
+            WHEN NOT MATCHED THEN INSERT (
+                ticker, position_factor, vr_score_used, sector, sector_avg_vr,
+                vr_diff, vr_component, market_cap_percentile, mcap_component,
+                pf_in_range, pf_expected, scored_at, updated_at
+            ) VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP()
+            )
+        """
+        params = [
+            # USING clause
+            ticker,
+            # UPDATE SET
+            position_factor, vr_score_used, sector, sector_avg_vr,
+            vr_diff, vr_component, market_cap_percentile, mcap_component,
+            pf_in_range, pf_expected,
+            # INSERT VALUES
+            ticker, position_factor, vr_score_used, sector, sector_avg_vr,
+            vr_diff, vr_component, market_cap_percentile, mcap_component,
+            pf_in_range, pf_expected,
+        ]
+        cursor.execute(sql, params)
+        conn.commit()
+        cursor.close()
+    finally:
+        conn.close()
+
+
+def _upsert_scoring_pf(ticker: str, pf: Optional[float]) -> None:
+    """MERGE INTO SCORING — updates only the pf column, preserving existing tc/vr/hr."""
+    from app.services.snowflake import get_snowflake_connection
+    conn = get_snowflake_connection()
+    try:
+        cursor = conn.cursor()
+        sql = """
+            MERGE INTO SCORING AS tgt
+            USING (SELECT %s AS ticker) AS src
+            ON tgt.ticker = src.ticker
+            WHEN MATCHED THEN UPDATE SET
+                pf         = %s,
+                updated_at = CURRENT_TIMESTAMP()
+            WHEN NOT MATCHED THEN INSERT
+                (ticker, pf, scored_at, updated_at)
+            VALUES
+                (%s, %s, CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP())
+        """
+        cursor.execute(sql, [ticker, pf, ticker, pf])
+        conn.commit()
+        cursor.close()
+    finally:
+        conn.close()
+
+
+# =====================================================================
+# Response models for GET endpoints
+# =====================================================================
+
+class PFScoringRecord(BaseModel):
+    """PF score stored in the SCORING table for one company."""
+    ticker: str
+    pf: Optional[float] = None
+    scored_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class PortfolioPFScoringResponse(BaseModel):
+    """SCORING table PF rows for all CS3 portfolio companies."""
+    status: str
+    results: List[PFScoringRecord]
+    message: Optional[str] = None
+
+
+def _fetch_pf_row(ticker: str) -> Optional[PFScoringRecord]:
+    """Read pf column from the Snowflake SCORING table for one ticker."""
+    from app.services.snowflake import get_snowflake_connection
+    from snowflake.connector import DictCursor
+    conn = get_snowflake_connection()
+    try:
+        cursor = conn.cursor(DictCursor)
+        cursor.execute(
+            "SELECT ticker, pf, scored_at, updated_at FROM SCORING WHERE ticker = %s",
+            [ticker.upper()],
+        )
+        row = cursor.fetchone()
+        cursor.close()
+        if not row:
+            return None
+        return PFScoringRecord(
+            ticker=row["TICKER"],
+            pf=row.get("PF"),
+            scored_at=str(row["SCORED_AT"]) if row.get("SCORED_AT") else None,
+            updated_at=str(row["UPDATED_AT"]) if row.get("UPDATED_AT") else None,
+        )
+    finally:
+        conn.close()
+
+
+# =====================================================================
+# GET /api/v1/scoring/pf/portfolio — Read all 5 from Snowflake
+# =====================================================================
+
+@router.get(
+    "/pf/portfolio",
+    response_model=PortfolioPFScoringResponse,
+    summary="Get last computed Position Factor for all 5 CS3 companies (from Snowflake)",
+    description="""
+    Reads the latest PF scores for all 5 CS3 portfolio companies from the
+    Snowflake SCORING table. No computation is performed.
+
+    Use POST /pf/portfolio to (re)compute and refresh the stored scores.
+    """,
+)
+async def get_portfolio_pf():
+    """Return last stored Position Factor for all 5 portfolio companies."""
+    results = []
+    for ticker in CS3_PORTFOLIO:
+        try:
+            row = _fetch_pf_row(ticker)
+            results.append(row if row else PFScoringRecord(ticker=ticker))
+        except Exception as e:
+            logger.warning(f"[{ticker}] Failed to fetch SCORING row: {e}")
+            results.append(PFScoringRecord(ticker=ticker))
+
+    scored = sum(1 for r in results if r.pf is not None)
+    return PortfolioPFScoringResponse(
+        status="ok",
+        results=results,
+        message=f"{scored}/{len(CS3_PORTFOLIO)} companies have stored PF scores",
+    )
+
+
+# =====================================================================
+# GET /api/v1/scoring/pf/{ticker} — Read one from Snowflake
+# =====================================================================
+
+@router.get(
+    "/pf/{ticker}",
+    response_model=PFScoringRecord,
+    summary="Get last computed Position Factor for one company (from Snowflake)",
+    description="""
+    Reads the latest PF score for a single ticker from the Snowflake SCORING table.
+    No computation is performed.
+
+    Use POST /pf/{ticker} to (re)compute and refresh the stored score.
+    """,
+)
+async def get_pf(ticker: str):
+    """Return last stored Position Factor for one company."""
+    from fastapi import HTTPException
+    row = _fetch_pf_row(ticker.upper())
+    if not row:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No scoring record found for {ticker.upper()}. Run POST /pf/{ticker} first.",
+        )
+    return row
