@@ -17,10 +17,12 @@ cd pe-org-air-platform
 source .venv/bin/activate  # Unix
 .venv\Scripts\activate     # Windows
 
-# Install dependencies (poetry-based project)
-pip install -r requirements.txt
-# Or with poetry:
+# Install dependencies (poetry is the canonical package manager)
 poetry install
+# Development tools (linters, test tools) are in the dev group:
+poetry install --with dev
+# requirements.txt is also available (used by Docker):
+pip install -r requirements.txt
 
 # Run FastAPI server (development mode with auto-reload)
 python -m app.main
@@ -29,6 +31,16 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 # Run Streamlit UI
 streamlit run streamlit/app.py
+
+# Run Pipeline 2 (jobs + patents → S3 + Snowflake)
+python -m app.pipelines.pipeline2_runner --companies CAT DE UNH --mode both
+python -m app.pipelines.pipeline2_runner --companies JPM --mode patents --years 5
+python -m app.pipelines.pipeline2_runner --companies WMT --step extract  # single step
+
+# Run utility scripts
+python -m app.scripts.test_connections       # Verify Snowflake + S3 + Redis
+python -m app.scripts.collect_evidence       # Evidence collection helper
+python -m app.scripts.query_snowflake        # Run ad-hoc Snowflake queries
 ```
 
 ### Testing
@@ -48,19 +60,20 @@ pytest -k "test_rubric_scorer"
 
 ### Docker
 ```bash
-# Build and run with docker-compose
-cd docker
-docker-compose up --build
+# Build and run with docker-compose (run from pe-org-air-platform/ directory)
+docker-compose -f docker/docker-compose.yml up --build
 
 # Run in detached mode
-docker-compose up -d
+docker-compose -f docker/docker-compose.yml up -d
 
 # View logs
-docker-compose logs -f api
+docker-compose -f docker/docker-compose.yml logs -f api
 
 # Stop services
-docker-compose down
+docker-compose -f docker/docker-compose.yml down
 ```
+
+> **Note:** The compose file uses `context: .` so it must be run from `pe-org-air-platform/` (not from inside `docker/`). The Docker image installs from `requirements.txt`, not `pyproject.toml`.
 
 ### Linting and Formatting
 ```bash
@@ -313,9 +326,18 @@ The codebase follows a **Router → Service → Repository** pattern:
 Key routes (see Swagger UI at http://localhost:8000/docs):
 
 - `POST /api/scoring/run` - Run full scoring pipeline for a company
-- `POST /api/v1/scoring/tc-vr/{ticker}` - Compute TC + V^R for one company
+- `POST /api/v1/scoring/tc-vr/{ticker}` - Compute TC + V^R → saves to S3 + SCORING table
+- `GET  /api/v1/scoring/tc-vr/{ticker}` - Read last TC + V^R from Snowflake SCORING table
 - `POST /api/v1/scoring/tc-vr/portfolio` - Compute TC + V^R for all 5 CS3 companies
-- `GET /api/v1/scoring/tc-vr/{ticker}` - View last computed TC + V^R (from Snowflake)
+- `GET  /api/v1/scoring/tc-vr/portfolio` - Read all 5 TC + V^R from SCORING table
+- `POST /api/v1/scoring/pf/{ticker}` - Compute Position Factor → saves to S3 + SCORING table
+- `GET  /api/v1/scoring/pf/{ticker}` - Read last PF from Snowflake SCORING table
+- `POST /api/v1/scoring/pf/portfolio` - Compute PF for all 5 CS3 companies
+- `GET  /api/v1/scoring/pf/portfolio` - Read all 5 PF from SCORING table
+- `POST /api/v1/scoring/hr/{ticker}` - Compute H^R → saves to S3 + SCORING table
+- `GET  /api/v1/scoring/hr/{ticker}` - Read last H^R from Snowflake SCORING table
+- `POST /api/v1/scoring/hr/portfolio` - Compute H^R for all 5 CS3 companies
+- `GET  /api/v1/scoring/hr/portfolio` - Read all 5 H^R from SCORING table
 - `POST /api/v1/board-governance/analyze/{ticker}` - Analyze board composition from DEF-14A
 - `GET /api/companies/{ticker}` - Get company details
 - `POST /api/signals/jobs` - Trigger job signal collection
@@ -346,3 +368,9 @@ Optional LLM keys (for future rubric scoring enhancements):
 - **Windows compatibility:** Signal handlers have a fallback for Windows (see `app/main.py`)
 - **Case Study versions:** CS2 = external signals (4 signals + SEC), CS3 = CS2 + Glassdoor reviews + board governance + TC + V^R scoring
 - **CS3 portfolio:** NVDA, JPM, WMT, GE, DG (defined in `tc_vr_scoring.py` as `CS3_PORTFOLIO`)
+- **Legacy code at file tops:** Several files (`config.py`, `pipeline2_runner.py`) contain large commented-out blocks of old implementations at the top, followed by the active code below. The live implementation is always the uncommented section.
+- **CS3 Snowflake tables:** `signal_dimension_mapping` and `evidence_dimension_scores` are created by the CS3 scoring pipeline (not in `schema.sql`). Query examples are in `Summary Files/cs3_portfolio_summary.md`.
+- **SCORING table:** Added to `schema.sql` — stores `ticker, tc, vr, pf, hr, scored_at, updated_at` (one row per company, upserted via MERGE). All three CS3 POST scorers (tc-vr, pf, hr) write to this table; GET endpoints read from it.
+- **GET endpoints for CS3 scorers:** `tc_vr_scoring.py`, `position_factor.py`, and `hr_scoring.py` each have `GET /{type}/{ticker}` and `GET /{type}/portfolio` endpoints that read from the SCORING table without recomputing. POST endpoints now also save JSON to S3 (`scoring/{type}/{ticker}/{timestamp}.json`).
+- **Swagger tag ordering:** `openapi_tags` in `main.py` controls section display order. Router tag names were updated to match: `"health"→"Health"`, `"industries"→"Industries"`, `"companies"→"Companies"`, `"board-governance"→"Board Governance"`. Signal DELETE reset endpoints now explicitly use `tags=["Reset (Demo)"]` to appear in a separate section from `"Signals"`.
+- **13 tracked companies:** CAT, DE, UNH, HCA, ADP, PAYX, WMT, TGT, JPM, GS, NVDA, GE, DG — all defined in `COMPANY_NAME_MAPPINGS` in `config.py` with their SEC CIK numbers in `sec_edgar.py`.

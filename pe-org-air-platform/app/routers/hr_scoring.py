@@ -236,9 +236,10 @@ async def score_portfolio_hr():
         results.append(result)
         if result.status == "success":
             scored += 1
+            _save_hr_result(result)
         else:
             failed += 1
-    
+
     # Build summary table
     summary = []
     logger.info("")
@@ -320,8 +321,11 @@ async def score_portfolio_hr():
     """,
 )
 async def score_hr(ticker: str):
-    """Calculate H^R for one company."""
-    return _compute_hr(ticker.upper())
+    """Calculate H^R for one company. Saves to S3 + Snowflake SCORING table."""
+    result = _compute_hr(ticker.upper())
+    if result.status == "success":
+        _save_hr_result(result)
+    return result
 
 
 # =====================================================================
@@ -478,3 +482,222 @@ async def download_hr_report():
             "Content-Length": str(len(md_content.encode("utf-8"))),
         },
     )
+
+
+# =====================================================================
+# Snowflake + S3 persistence helpers
+# =====================================================================
+
+def _save_hr_result(result: HRResponse) -> None:
+    """Save H^R result to S3 JSON and upsert into Snowflake SCORING and HR_SCORING tables."""
+    ticker = result.ticker
+    try:
+        from app.services.s3_storage import get_s3_service
+        s3 = get_s3_service()
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        s3_key = f"scoring/hr/{ticker}/{ts}.json"
+        s3.upload_json(result.model_dump(), s3_key)
+        logger.info(f"[{ticker}] H^R result saved to S3: {s3_key}")
+    except Exception as e:
+        logger.warning(f"[{ticker}] S3 save failed (non-fatal): {e}")
+
+    try:
+        _upsert_scoring_hr(ticker, hr=result.hr_score)
+        logger.info(f"[{ticker}] SCORING table upserted: HR={result.hr_score}")
+    except Exception as e:
+        logger.warning(f"[{ticker}] Snowflake SCORING upsert failed (non-fatal): {e}")
+
+    # HR_SCORING — breakdown detail table
+    try:
+        _upsert_hr_scoring(result)
+        logger.info(f"[{ticker}] HR_SCORING table upserted")
+    except Exception as e:
+        logger.warning(f"[{ticker}] HR_SCORING upsert failed (non-fatal): {e}")
+
+
+def _upsert_hr_scoring(result: HRResponse) -> None:
+    """MERGE all H^R sub-components into HR_SCORING."""
+    from app.services.snowflake import get_snowflake_connection
+    ticker = result.ticker
+    bd  = result.hr_breakdown
+    val = result.validation
+
+    hr_score             = result.hr_score
+    hr_base              = bd.hr_base            if bd else None
+    position_factor_used = bd.position_factor    if bd else None
+    position_adjustment  = bd.position_adjustment if bd else None
+    sector               = bd.sector             if bd else None
+    interpretation       = bd.interpretation     if bd else None
+    hr_in_range          = val.hr_in_range       if val else None
+    hr_expected          = val.hr_expected       if val else None
+
+    conn = get_snowflake_connection()
+    try:
+        cursor = conn.cursor()
+        sql = """
+            MERGE INTO HR_SCORING AS tgt
+            USING (SELECT %s AS ticker) AS src
+            ON tgt.ticker = src.ticker
+            WHEN MATCHED THEN UPDATE SET
+                hr_score             = %s,
+                hr_base              = %s,
+                position_factor_used = %s,
+                position_adjustment  = %s,
+                sector               = %s,
+                interpretation       = %s,
+                hr_in_range          = %s,
+                hr_expected          = %s,
+                updated_at           = CURRENT_TIMESTAMP()
+            WHEN NOT MATCHED THEN INSERT (
+                ticker, hr_score, hr_base, position_factor_used, position_adjustment,
+                sector, interpretation, hr_in_range, hr_expected, scored_at, updated_at
+            ) VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP()
+            )
+        """
+        params = [
+            # USING clause
+            ticker,
+            # UPDATE SET
+            hr_score, hr_base, position_factor_used, position_adjustment,
+            sector, interpretation, hr_in_range, hr_expected,
+            # INSERT VALUES
+            ticker, hr_score, hr_base, position_factor_used, position_adjustment,
+            sector, interpretation, hr_in_range, hr_expected,
+        ]
+        cursor.execute(sql, params)
+        conn.commit()
+        cursor.close()
+    finally:
+        conn.close()
+
+
+def _upsert_scoring_hr(ticker: str, hr: Optional[float]) -> None:
+    """MERGE INTO SCORING — updates only the hr column, preserving existing tc/vr/pf."""
+    from app.services.snowflake import get_snowflake_connection
+    conn = get_snowflake_connection()
+    try:
+        cursor = conn.cursor()
+        sql = """
+            MERGE INTO SCORING AS tgt
+            USING (SELECT %s AS ticker) AS src
+            ON tgt.ticker = src.ticker
+            WHEN MATCHED THEN UPDATE SET
+                hr         = %s,
+                updated_at = CURRENT_TIMESTAMP()
+            WHEN NOT MATCHED THEN INSERT
+                (ticker, hr, scored_at, updated_at)
+            VALUES
+                (%s, %s, CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP())
+        """
+        cursor.execute(sql, [ticker, hr, ticker, hr])
+        conn.commit()
+        cursor.close()
+    finally:
+        conn.close()
+
+
+# =====================================================================
+# Response models for GET endpoints
+# =====================================================================
+
+class HRScoringRecord(BaseModel):
+    """H^R score stored in the SCORING table for one company."""
+    ticker: str
+    hr: Optional[float] = None
+    scored_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class PortfolioHRScoringResponse(BaseModel):
+    """SCORING table HR rows for all CS3 portfolio companies."""
+    status: str
+    results: List[HRScoringRecord]
+    message: Optional[str] = None
+
+
+def _fetch_hr_row(ticker: str) -> Optional[HRScoringRecord]:
+    """Read hr column from the Snowflake SCORING table for one ticker."""
+    from app.services.snowflake import get_snowflake_connection
+    from snowflake.connector import DictCursor
+    conn = get_snowflake_connection()
+    try:
+        cursor = conn.cursor(DictCursor)
+        cursor.execute(
+            "SELECT ticker, hr, scored_at, updated_at FROM SCORING WHERE ticker = %s",
+            [ticker.upper()],
+        )
+        row = cursor.fetchone()
+        cursor.close()
+        if not row:
+            return None
+        return HRScoringRecord(
+            ticker=row["TICKER"],
+            hr=row.get("HR"),
+            scored_at=str(row["SCORED_AT"]) if row.get("SCORED_AT") else None,
+            updated_at=str(row["UPDATED_AT"]) if row.get("UPDATED_AT") else None,
+        )
+    finally:
+        conn.close()
+
+
+# =====================================================================
+# GET /api/v1/scoring/hr/portfolio — Read all 5 from Snowflake
+# =====================================================================
+
+@router.get(
+    "/hr/portfolio",
+    response_model=PortfolioHRScoringResponse,
+    summary="Get last computed H^R for all 5 CS3 companies (from Snowflake)",
+    description="""
+    Reads the latest H^R scores for all 5 CS3 portfolio companies from the
+    Snowflake SCORING table. No computation is performed.
+
+    Use POST /hr/portfolio to (re)compute and refresh the stored scores.
+    """,
+)
+async def get_portfolio_hr():
+    """Return last stored H^R for all 5 portfolio companies."""
+    results = []
+    for ticker in CS3_PORTFOLIO:
+        try:
+            row = _fetch_hr_row(ticker)
+            results.append(row if row else HRScoringRecord(ticker=ticker))
+        except Exception as e:
+            logger.warning(f"[{ticker}] Failed to fetch SCORING row: {e}")
+            results.append(HRScoringRecord(ticker=ticker))
+
+    scored = sum(1 for r in results if r.hr is not None)
+    return PortfolioHRScoringResponse(
+        status="ok",
+        results=results,
+        message=f"{scored}/{len(CS3_PORTFOLIO)} companies have stored H^R scores",
+    )
+
+
+# =====================================================================
+# GET /api/v1/scoring/hr/{ticker} — Read one from Snowflake
+# =====================================================================
+
+@router.get(
+    "/hr/{ticker}",
+    response_model=HRScoringRecord,
+    summary="Get last computed H^R for one company (from Snowflake)",
+    description="""
+    Reads the latest H^R score for a single ticker from the Snowflake SCORING table.
+    No computation is performed.
+
+    Use POST /hr/{ticker} to (re)compute and refresh the stored score.
+    """,
+)
+async def get_hr(ticker: str):
+    """Return last stored H^R for one company."""
+    from fastapi import HTTPException
+    row = _fetch_hr_row(ticker.upper())
+    if not row:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No scoring record found for {ticker.upper()}. Run POST /hr/{ticker} first.",
+        )
+    return row

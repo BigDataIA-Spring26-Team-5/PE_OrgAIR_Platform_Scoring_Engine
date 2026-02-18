@@ -204,6 +204,7 @@ router = APIRouter(prefix="/api/v1", tags=["Signals"])
 
 @router.delete(
     "/signals/reset",
+    tags=["Reset (Demo)"],
     summary="Delete all signals for all companies",
     description="Deletes all signal records from Snowflake and all signal-related files from S3 for every company.",
 )
@@ -271,6 +272,7 @@ async def reset_all_signals():
 
 @router.delete(
     "/signals/reset/{ticker}",
+    tags=["Reset (Demo)"],
     summary="Delete all signals for a company",
     description="Deletes all signal records from Snowflake and signal files from S3 for the given ticker.",
 )
@@ -343,6 +345,7 @@ async def reset_signals_by_ticker(ticker: str):
 
 @router.delete(
     "/signals/reset/{ticker}/{category}",
+    tags=["Reset (Demo)"],
     summary="Delete signals by category for a company",
     description="Deletes signal records for a specific category from Snowflake and S3.",
 )

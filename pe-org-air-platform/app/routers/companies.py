@@ -20,7 +20,7 @@ from app.repositories.company_repository import CompanyRepository
 from app.repositories.industry_repository import IndustryRepository
 from app.services.cache import get_cache, TTL_COMPANY
 
-router = APIRouter(prefix="/api/v1", tags=["companies"])
+router = APIRouter(prefix="/api/v1", tags=["Companies"])
 
 
 
