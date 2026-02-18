@@ -28,6 +28,32 @@ load_dotenv()
 from app.shutdown import set_shutdown, is_shutting_down
 
 
+# SWAGGER UI — tag display order
+_OPENAPI_TAGS = [
+    {"name": "Root"},
+    {"name": "Health"},
+    {"name": "Industries"},
+    {"name": "Companies"},
+    {"name": "Assessments"},
+    {"name": "Dimension Scores"},
+    {"name": "1. Collection"},
+    {"name": "2. Parsing"},
+    {"name": "3. Chunking"},
+    {"name": "5. Management"},
+    {"name": "6. Reset (Demo)"},
+    {"name": "Signals"},
+    {"name": "Reset (Demo)"},
+    {"name": "Signal Scoring"},
+    {"name": "Evidence"},
+    {"name": "4. Reports"},
+    {"name": "Board Governance"},
+    {"name": "Glassdoor Culture Signals"},
+    {"name": "CS3 Scoring"},
+    {"name": "CS3 TC + V^R Scoring"},
+    {"name": "CS3 Position Factor"},
+    {"name": "CS3 H^R (Human Readiness)"},
+]
+
 # FASTAPI APPLICATION CONFIGURATION
 app = FastAPI(
     title="PE Org-AI-R Platform Foundation API",
@@ -35,6 +61,7 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
     openapi_url="/openapi.json",
+    openapi_tags=_OPENAPI_TAGS,
 )
 
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -42,23 +69,23 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 # REGISTER EXCEPTION HANDLERS
 app.add_exception_handler(RequestValidationError, validation_exception_handler)
 
-# REGISTER ROUTERS
+# REGISTER ROUTERS (order matches _OPENAPI_TAGS / Swagger UI display order)
 # app.include_router(tc_vr_scoring_router)
-app.include_router(hr_router)
-app.include_router(pf_router)
-app.include_router(tc_vr_router)
-app.include_router(board_governance_router)
-app.include_router(glassdoor_signals_router)
-app.include_router(scoring_router)
-app.include_router(health_router)
-app.include_router(industries_router)
-app.include_router(companies_router)
-app.include_router(documents_router)
+app.include_router(health_router)           # Health
+app.include_router(industries_router)       # Industries
+app.include_router(companies_router)        # Companies
+app.include_router(assessments_router)      # Assessments
+app.include_router(dimension_scores_router) # Dimension Scores
+app.include_router(documents_router)        # 1.Collection / 2.Parsing / 3.Chunking / 5.Management / 6.Reset(Demo)
 # app.include_router(pdf_parser_router)
-app.include_router(signals_router)
-app.include_router(assessments_router)
-app.include_router(dimension_scores_router)
-app.include_router(evidence_router)
+app.include_router(signals_router)          # Signals / Reset(Demo) / Signal Scoring
+app.include_router(evidence_router)         # Evidence
+app.include_router(board_governance_router) # Board Governance
+app.include_router(glassdoor_signals_router)# Glassdoor Culture Signals
+app.include_router(scoring_router)          # CS3 Scoring
+app.include_router(tc_vr_router)            # CS3 TC + V^R Scoring
+app.include_router(pf_router)               # CS3 Position Factor
+app.include_router(hr_router)               # CS3 H^R (Human Readiness)
 
 
 # ROOT ENDPOINT
