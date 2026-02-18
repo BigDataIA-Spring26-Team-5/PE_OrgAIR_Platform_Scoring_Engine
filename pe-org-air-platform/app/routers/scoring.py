@@ -1,5 +1,5 @@
 """
-CS3 Scoring API Router
+CS3 Dimensions Scoring API Router
 app/routers/scoring.py
 
 Endpoints:
@@ -25,7 +25,7 @@ import time
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1", tags=["CS3 Scoring"])
+router = APIRouter(prefix="/api/v1", tags=["CS3 Dimensions Scoring"])
 
 
 # =====================================================================
@@ -98,10 +98,10 @@ class SummaryResponse(BaseModel):
     response_model=AllScoringResponse,
     summary="Score all companies with CS2 data",
     description="""
-    Runs the CS3 scoring pipeline for every company that has a signal summary
+    Runs the CS3 Dimensions Scoring pipeline for every company that has a signal summary
     in `company_signal_summaries`. Returns individual results for each.
     """,
-    tags=["CS3 Scoring"],
+    tags=["CS3 Dimensions Scoring"],
 )
 async def score_all_companies():
     """Score all companies."""
@@ -155,7 +155,7 @@ async def score_all_companies():
     response_model=ScoringResponse,
     summary="Score a company (CS3 full pipeline)",
     description="""
-    Runs the full CS3 scoring pipeline for a single company:
+    Runs the full CS3 Dimensions Scoring pipeline for a single company:
 
     1. **Reads CS2 signals** from `company_signal_summaries` (hiring, innovation, digital, leadership)
     2. **Reads SEC sections** from `document_chunks` + S3 (Item 1, 1A, 7)
@@ -165,7 +165,7 @@ async def score_all_companies():
 
     **Prerequisite:** Company must have CS2 signal data (run signal scoring first).
     """,
-    tags=["CS3 Scoring"],
+    tags=["CS3 Dimensions Scoring"],
 )
 async def score_company(ticker: str):
     """Score one company — full CS3 pipeline."""
@@ -218,7 +218,7 @@ async def score_company(ticker: str):
     SELECT * FROM signal_dimension_mapping WHERE ticker = '{ticker}'
     ```
     """,
-    tags=["CS3 Scoring"],
+    tags=["CS3 Dimensions Scoring"],
 )
 async def get_mapping_matrix(ticker: str):
     """View the mapping matrix from Snowflake."""
@@ -266,7 +266,7 @@ async def get_mapping_matrix(ticker: str):
     SELECT * FROM evidence_dimension_scores WHERE ticker = '{ticker}'
     ```
     """,
-    tags=["CS3 Scoring"],
+    tags=["CS3 Dimensions Scoring"],
 )
 async def get_dimension_scores(ticker: str):
     """View dimension scores from Snowflake."""
@@ -309,7 +309,7 @@ async def get_dimension_scores(ticker: str):
     Returns everything: the mapping matrix, dimension scores, coverage report,
     and evidence source info — all from Snowflake.
     """,
-    tags=["CS3 Scoring"],
+    tags=["CS3 Dimensions Scoring"],
 )
 async def get_full_scoring_view(ticker: str):
     """Full scoring view from Snowflake."""
@@ -395,7 +395,7 @@ async def get_full_scoring_view(ticker: str):
     Returns a summary of dimension scores across all scored companies.
     Useful for comparing AI readiness across the portfolio.
     """,
-    tags=["CS3 Scoring"],
+    tags=["CS3 Dimensions Scoring"],
 )
 async def get_scoring_summary():
     """View all companies' dimension scores."""
@@ -436,7 +436,7 @@ async def get_scoring_summary():
     "/scoring/{ticker}",
     summary="Delete scoring data for a company",
     description="Removes mapping matrix and dimension scores from Snowflake.",
-    tags=["CS3 Scoring"],
+    tags=["CS3 Dimensions Scoring"],
 )
 async def delete_scoring_data(ticker: str):
     """Delete scoring data for a company."""
