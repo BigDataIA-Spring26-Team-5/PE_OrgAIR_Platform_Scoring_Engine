@@ -6,7 +6,15 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import List, Optional, Set
 
+from rapidfuzz import fuzz
+
 logger = logging.getLogger(__name__)
+
+_SKILL_FUZZY_THRESHOLD     = 88   # partial_ratio: skill name vs description text
+_SENIORITY_FUZZY_THRESHOLD = 82   # ratio: title word vs seniority keyword
+_AI_MENTION_FUZZY_THRESHOLD = 88  # partial_ratio: AI keyword vs review text
+_FUZZY_SKILL_MIN_LEN       = 6   # skip fuzzy for very short skill tokens (e.g. "go", "r")
+_FUZZY_KEYWORD_MIN_LEN     = 8   # skip fuzzy for short AI terms already handled by regex
 
 # AI awareness keywords (mirrors glassdoor_collector.py AI_AWARENESS_KEYWORDS)
 _AI_KEYWORDS = frozenset([
@@ -120,6 +128,20 @@ class TalentConcentrationCalculator:
                 mid_ai_jobs += 1
             elif title_words & entry_keywords:
                 entry_ai_jobs += 1
+            else:
+                # Fuzzy fallback: catches punctuation-attached words ("director,")
+                # and 1-2 char typos ("senor", "pricipal")
+                def _fuzzy_word_match(words, kw_set):
+                    return any(
+                        fuzz.ratio(w, kw) >= _SENIORITY_FUZZY_THRESHOLD
+                        for w in words for kw in kw_set
+                    )
+                if _fuzzy_word_match(title_words, senior_keywords):
+                    senior_ai_jobs += 1
+                elif _fuzzy_word_match(title_words, mid_keywords):
+                    mid_ai_jobs += 1
+                elif _fuzzy_word_match(title_words, entry_keywords):
+                    entry_ai_jobs += 1
 
             # Source 1: pre-computed skills from CS2
             unique_skills.update(posting.get("ai_skills_found", []))
@@ -129,10 +151,15 @@ class TalentConcentrationCalculator:
             if desc:
                 for skill in _EXPANDED_AI_SKILLS:
                     if skill in _WHOLE_WORD_SKILLS:
+                        # Short tokens: keep regex whole-word, no fuzzy (too short = high false-positive risk)
                         if re.search(r"\b" + re.escape(skill) + r"\b", desc):
                             unique_skills.add(skill)
-                    else:
-                        if skill in desc:
+                    elif skill in desc:
+                        # Exact substring fast path
+                        unique_skills.add(skill)
+                    elif len(skill) >= _FUZZY_SKILL_MIN_LEN:
+                        # Fuzzy fallback: catches "pytoch", "scikit learn", "tensor rt", etc.
+                        if fuzz.partial_ratio(skill, desc) >= _SKILL_FUZZY_THRESHOLD:
                             unique_skills.add(skill)
 
         return JobAnalysis(
@@ -307,11 +334,17 @@ class TalentConcentrationCalculator:
             matched = False
             for kw in _AI_KEYWORDS:
                 if kw in whole_word_terms:
+                    # Short acronyms ("ai", "ml", "nlp", "llm"): whole-word regex only
                     if re.search(rf"\b{re.escape(kw)}\b", text):
                         matched = True
                         break
-                else:
-                    if kw in text:
+                elif kw in text:
+                    # Exact substring fast path
+                    matched = True
+                    break
+                elif len(kw) >= _FUZZY_KEYWORD_MIN_LEN:
+                    # Fuzzy fallback: catches "artifical intelligence", "deeplearning", etc.
+                    if fuzz.partial_ratio(kw, text) >= _AI_MENTION_FUZZY_THRESHOLD:
                         matched = True
                         break
             if matched:
