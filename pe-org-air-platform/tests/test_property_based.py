@@ -21,6 +21,9 @@ from app.scoring.evidence_mapper import (
     SignalSource,
 )
 from app.scoring.vr_calculator import VRCalculator, VRResult
+from app.scoring.synergy_calculator import SynergyCalculator
+from app.scoring.confidence_calculator import ConfidenceCalculator
+from app.scoring.orgair_calculator import OrgAIRCalculator
 
 # ---------------------------------------------------------------------------
 # Shared strategies
@@ -232,3 +235,131 @@ class TestEvidenceMapperPropertyBased:
         )
 
         assert avg_large >= avg_small
+
+
+# ---------------------------------------------------------------------------
+# Shared strategies for new calculators
+# ---------------------------------------------------------------------------
+
+score_0_100 = st.floats(
+    min_value=0.0, max_value=100.0, allow_nan=False, allow_infinity=False
+)
+alignment_st = st.floats(
+    min_value=0.0, max_value=1.0, allow_nan=False, allow_infinity=False
+)
+timing_st = st.floats(
+    min_value=0.5, max_value=1.5, allow_nan=False, allow_infinity=False
+)
+evidence_count_st = st.integers(min_value=1, max_value=50)
+
+
+# ---------------------------------------------------------------------------
+# Synergy Property Tests
+# ---------------------------------------------------------------------------
+
+
+class TestSynergyPropertyBased:
+    """3 property tests for SynergyCalculator."""
+
+    @given(score_0_100, score_0_100, alignment_st, timing_st)
+    @settings(max_examples=500)
+    def test_synergy_always_bounded(self, vr, hr, alignment, timing):
+        """Synergy score is always in [0, 100] for any valid inputs."""
+        result = SynergyCalculator().calculate(vr, hr, alignment=alignment, timing_factor=timing)
+        assert Decimal("0") <= result.synergy_score <= Decimal("100")
+
+    @given(score_0_100, alignment_st, timing_st)
+    @settings(max_examples=500)
+    def test_synergy_zero_when_either_is_zero(self, nonzero, alignment, timing):
+        """Synergy is 0 when VR=0 or HR=0."""
+        calc = SynergyCalculator()
+        result_vr_zero = calc.calculate(0.0, nonzero, alignment=alignment, timing_factor=timing)
+        result_hr_zero = calc.calculate(nonzero, 0.0, alignment=alignment, timing_factor=timing)
+        assert result_vr_zero.synergy_score == Decimal("0")
+        assert result_hr_zero.synergy_score == Decimal("0")
+
+    @given(score_0_100, score_0_100, alignment_st, timing_st)
+    @settings(max_examples=500)
+    def test_synergy_deterministic(self, vr, hr, alignment, timing):
+        """Same inputs always produce the same Synergy score."""
+        calc = SynergyCalculator()
+        r1 = calc.calculate(vr, hr, alignment=alignment, timing_factor=timing)
+        r2 = calc.calculate(vr, hr, alignment=alignment, timing_factor=timing)
+        assert r1.synergy_score == r2.synergy_score
+
+
+# ---------------------------------------------------------------------------
+# Confidence Interval Property Tests
+# ---------------------------------------------------------------------------
+
+
+class TestConfidencePropertyBased:
+    """3 property tests for ConfidenceCalculator."""
+
+    @given(score_0_100, evidence_count_st, st.sampled_from(["vr", "hr", "org_air"]))
+    @settings(max_examples=500)
+    def test_ci_always_valid_range(self, score, n, score_type):
+        """CI bounds are valid: ci_lower <= ci_upper, both within [0, 100]."""
+        result = ConfidenceCalculator().calculate(score, n, score_type)
+        assert result.ci_lower <= result.ci_upper
+        assert Decimal("0") <= result.ci_lower <= Decimal("100")
+        assert Decimal("0") <= result.ci_upper <= Decimal("100")
+
+    @given(score_0_100, st.sampled_from(["vr", "hr", "org_air"]))
+    @settings(max_examples=500)
+    def test_more_evidence_higher_reliability(self, score, score_type):
+        """Larger evidence count yields equal or higher reliability (ρ)."""
+        calc = ConfidenceCalculator()
+        small = calc.calculate(score, 1, score_type)
+        large = calc.calculate(score, 20, score_type)
+        assert large.reliability >= small.reliability
+
+    @given(score_0_100, evidence_count_st, st.sampled_from(["vr", "hr", "org_air"]))
+    @settings(max_examples=500)
+    def test_confidence_deterministic(self, score, n, score_type):
+        """Same inputs always produce the same CI."""
+        calc = ConfidenceCalculator()
+        r1 = calc.calculate(score, n, score_type)
+        r2 = calc.calculate(score, n, score_type)
+        assert r1.ci_lower == r2.ci_lower
+        assert r1.ci_upper == r2.ci_upper
+
+
+# ---------------------------------------------------------------------------
+# Org-AI-R Property Tests
+# ---------------------------------------------------------------------------
+
+
+class TestOrgAIRPropertyBased:
+    """3 property tests for OrgAIRCalculator."""
+
+    @given(score_0_100, score_0_100, score_0_100)
+    @settings(max_examples=500)
+    def test_orgair_always_bounded(self, vr, hr, synergy):
+        """Org-AI-R score is always in [0, 100] for any valid inputs."""
+        result = OrgAIRCalculator().calculate(vr, hr, synergy_score=synergy)
+        assert Decimal("0") <= result.org_air_score <= Decimal("100")
+
+    @given(
+        st.floats(min_value=0.0, max_value=80.0, allow_nan=False, allow_infinity=False),
+        st.floats(min_value=10.0, max_value=20.0, allow_nan=False, allow_infinity=False),
+        score_0_100,
+        score_0_100,
+    )
+    @settings(max_examples=500)
+    def test_orgair_monotone_with_vr(self, vr_low, delta, hr, synergy):
+        """Increasing VR (with HR and synergy fixed) does not decrease Org-AI-R."""
+        vr_high = min(100.0, vr_low + delta)
+        calc = OrgAIRCalculator()
+        result_low = calc.calculate(vr_low, hr, synergy_score=synergy)
+        result_high = calc.calculate(vr_high, hr, synergy_score=synergy)
+        assert result_high.org_air_score >= result_low.org_air_score
+
+    @given(score_0_100, score_0_100, score_0_100)
+    @settings(max_examples=500)
+    def test_orgair_deterministic(self, vr, hr, synergy):
+        """Same inputs always produce the same Org-AI-R score."""
+        calc = OrgAIRCalculator()
+        r1 = calc.calculate(vr, hr, synergy_score=synergy)
+        r2 = calc.calculate(vr, hr, synergy_score=synergy)
+        assert r1.org_air_score == r2.org_air_score
