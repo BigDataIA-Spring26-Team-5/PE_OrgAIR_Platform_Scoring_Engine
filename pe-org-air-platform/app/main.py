@@ -23,6 +23,7 @@ from app.routers.glassdoor_signals import router as glassdoor_signals_router
 from app.routers.tc_vr_scoring import router as tc_vr_router
 from app.routers.position_factor import router as pf_router
 from app.routers.hr_scoring import router as hr_router
+from app.routers.orgair_scoring import router as orgair_router
 load_dotenv()
 
 from app.shutdown import set_shutdown, is_shutting_down
@@ -50,6 +51,7 @@ _OPENAPI_TAGS = [
     {"name": "CS3 TC + V^R Scoring"},
     {"name": "CS3 Position Factor"},
     {"name": "CS3 H^R (Human Readiness)"},
+    {"name": "CS3 Org-AI-R"},
 ]
 
 # FASTAPI APPLICATION CONFIGURATION
@@ -84,6 +86,7 @@ app.include_router(scoring_router)          # CS3 Scoring
 app.include_router(tc_vr_router)            # CS3 TC + V^R Scoring
 app.include_router(pf_router)               # CS3 Position Factor
 app.include_router(hr_router)               # CS3 H^R (Human Readiness)
+app.include_router(orgair_router)           # CS3 Org-AI-R
 
 
 # ROOT ENDPOINT
