@@ -18,7 +18,7 @@ from app.core.dependencies import get_industry_repository
 from app.repositories.industry_repository import IndustryRepository
 from app.services.cache import get_cache, TTL_INDUSTRY
 
-router = APIRouter(prefix="/api/v1", tags=["industries"])
+router = APIRouter(prefix="/api/v1", tags=["Industries"])
 
 
 

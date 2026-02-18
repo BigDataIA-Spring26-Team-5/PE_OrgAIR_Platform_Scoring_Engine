@@ -21,7 +21,7 @@ project_root = Path(__file__).resolve().parent.parent.parent
 env_path = project_root / ".env"
 load_dotenv(dotenv_path=env_path)
 
-router = APIRouter(tags=["health"])
+router = APIRouter(tags=["Health"])
 
 
 

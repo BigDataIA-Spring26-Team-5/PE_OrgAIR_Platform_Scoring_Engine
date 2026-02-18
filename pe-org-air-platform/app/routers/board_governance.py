@@ -22,7 +22,7 @@ from app.repositories.document_repository import get_document_repository
 from app.repositories.company_repository import CompanyRepository as get_company_repository
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1/board-governance", tags=["board-governance"])
+router = APIRouter(prefix="/api/v1/board-governance", tags=["Board Governance"])
 
 
 # ────────────────────────────────────────────────────────────────
