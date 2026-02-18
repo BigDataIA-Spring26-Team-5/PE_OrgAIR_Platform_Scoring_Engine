@@ -278,7 +278,7 @@
 
 # @router.get(
 #     "/report",
-#     tags=["4. Reports"],
+#     tags=["Reports"],
 #     summary="Get Evidence Collection Report",
 #     description="Get comprehensive statistics in JSON format"
 # )
@@ -316,7 +316,7 @@
 
 # @router.get(
 #     "/report/table",
-#     tags=["4. Reports"],
+#     tags=["Reports"],
 #     summary="Get Evidence Collection Report (Table Format)",
 #     description="Get report formatted as tables for easy viewing"
 # )
@@ -933,7 +933,7 @@ async def get_chunk_stats(ticker: str):
 
 @router.get(
     "/report",
-    tags=["4. Reports"],
+    tags=["Reports"],
     summary="Get Evidence Collection Report",
     description="Get comprehensive statistics in JSON format"
 )
@@ -972,7 +972,7 @@ async def get_evidence_report():
 
 @router.get(
     "/report/table",
-    tags=["4. Reports"],
+    tags=["Reports"],
     summary="Get Evidence Collection Report (Table Format)",
     description="Get report formatted as tables for easy viewing"
 )
@@ -1049,7 +1049,7 @@ async def get_evidence_report_table():
 
 @router.get(
     "/analysis/export",
-    tags=["4. Reports"],
+    tags=["Reports"],
     summary="Export section analysis as Markdown",
     description="Download sec_analysis.md file with all tables"
 )
@@ -1072,7 +1072,7 @@ async def export_section_analysis():
 
 @router.get(
     "/analysis",
-    tags=["4. Reports"],
+    tags=["Reports"],
     summary="Analyze sections for all companies",
     description="Get section analysis tables for all 10 companies (JSON)"
 )
@@ -1089,7 +1089,7 @@ async def analyze_all_sections():
 
 @router.get(
     "/analysis/{ticker}",
-    tags=["4. Reports"],
+    tags=["Reports"],
     summary="Analyze sections for a company",
     description="Get section word counts and keyword mentions for a single company"
 )
