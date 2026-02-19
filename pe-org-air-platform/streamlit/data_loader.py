@@ -13,7 +13,9 @@ import streamlit as st
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-API_BASE = os.getenv("FASTAPI_URL", "http://localhost:8000")
+# API_BASE = os.getenv("FASTAPI_URL", "http://localhost:8000")
+# API_BASE = os.getenv("FASTAPI_URL", "https://pe-orgair-platform-scoring-engine.onrender.com")
+API_BASE = st.secrets.get("FASTAPI_URL", os.getenv("FASTAPI_URL", "http://localhost:8000"))
 RESULTS_DIR = Path(__file__).parent.parent / "results"
 
 CS3_TICKERS = ["NVDA", "JPM", "WMT", "GE", "DG"]
@@ -54,18 +56,39 @@ def _api(path: str, timeout: int = 30) -> Optional[Dict]:
 # ---------------------------------------------------------------------------
 # Snowflake direct
 # ---------------------------------------------------------------------------
+
+# for local dev, we can use .env vars to connect to Snowflake; when deployed on Render, we switch to Streamlit secrets for better security and performance
+# def _get_snowflake_conn():
+#     import snowflake.connector
+#     from dotenv import load_dotenv
+#     project_root = Path(__file__).parent.parent
+#     load_dotenv(project_root / ".env")
+#     return snowflake.connector.connect(
+#         user=os.getenv("SNOWFLAKE_USER"),
+#         password=os.getenv("SNOWFLAKE_PASSWORD"),
+#         account=os.getenv("SNOWFLAKE_ACCOUNT"),
+#         warehouse=os.getenv("SNOWFLAKE_WAREHOUSE"),
+#         database=os.getenv("SNOWFLAKE_DATABASE"),
+#         schema=os.getenv("SNOWFLAKE_SCHEMA"),
+#     )
+
+# after hosting API on Render, we can switch to direct Snowflake queries for better performance on data-heavy pages like CS1 and CS2
 def _get_snowflake_conn():
     import snowflake.connector
-    from dotenv import load_dotenv
-    project_root = Path(__file__).parent.parent
-    load_dotenv(project_root / ".env")
+    # Try Streamlit secrets first, fall back to env vars
+    def _get(key):
+        try:
+            return st.secrets[key]
+        except Exception:
+            return os.getenv(key)
+    
     return snowflake.connector.connect(
-        user=os.getenv("SNOWFLAKE_USER"),
-        password=os.getenv("SNOWFLAKE_PASSWORD"),
-        account=os.getenv("SNOWFLAKE_ACCOUNT"),
-        warehouse=os.getenv("SNOWFLAKE_WAREHOUSE"),
-        database=os.getenv("SNOWFLAKE_DATABASE"),
-        schema=os.getenv("SNOWFLAKE_SCHEMA"),
+        user=_get("SNOWFLAKE_USER"),
+        password=_get("SNOWFLAKE_PASSWORD"),
+        account=_get("SNOWFLAKE_ACCOUNT"),
+        warehouse=_get("SNOWFLAKE_WAREHOUSE"),
+        database=_get("SNOWFLAKE_DATABASE"),
+        schema=_get("SNOWFLAKE_SCHEMA"),
     )
 
 

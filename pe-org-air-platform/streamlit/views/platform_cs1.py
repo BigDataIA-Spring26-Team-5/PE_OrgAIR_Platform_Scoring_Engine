@@ -6,7 +6,7 @@ import requests
 import plotly.graph_objects as go
 from streamlit_mermaid import st_mermaid
 
-from data_loader import check_health, get_table_counts
+from data_loader import API_BASE, check_health, get_table_counts
 
 
 def render():
@@ -53,7 +53,9 @@ def render():
         st.cache_data.clear()
         st.rerun()
 
-    API_BASE_URL = "http://localhost:8000"
+    # API_BASE_URL = "http://localhost:8000"
+    from data_loader import API_BASE
+    API_BASE_URL = API_BASE
     api_healthy = False
     health_data = None
     try:
