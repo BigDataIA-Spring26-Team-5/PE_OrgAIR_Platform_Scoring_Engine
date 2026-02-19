@@ -42,7 +42,8 @@ class HRCalculator:
     
     # Sector baseline H^R values (from CS3 Lab 6 documentation)
     SECTOR_HR_BASE: Dict[str, float] = {
-        "technology": 75.0,           # High digital maturity, abundant tech talent
+        # "technology": 75.0,           # High digital maturity, abundant tech talent
+         "technology": 84.0,           # was 75.0 — recalibrated for 2025-2026 AI boom
         "financial_services": 68.0,   # Heavy regulation, but strong digital innovation
         "healthcare": 62.0,           # Complex regulations, privacy concerns
         "business_services": 60.0,    # Growing adoption, service-oriented

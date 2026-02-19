@@ -16,6 +16,7 @@ from app.routers.documents import router as documents_router
 from app.routers.signals import router as signals_router
 from app.routers.evidence import router as evidence_router
 from app.routers.scoring import router as scoring_router
+# from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.cors import CORSMiddleware
 from app.routers.board_governance import router as board_governance_router
 from app.routers.glassdoor_signals import router as glassdoor_signals_router
@@ -64,7 +65,16 @@ app = FastAPI(
     openapi_tags=_OPENAPI_TAGS,
 )
 
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+# app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # REGISTER EXCEPTION HANDLERS
 app.add_exception_handler(RequestValidationError, validation_exception_handler)

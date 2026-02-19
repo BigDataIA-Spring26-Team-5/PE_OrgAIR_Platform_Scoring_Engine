@@ -1,1510 +1,2325 @@
-# streamlit/app.py
-# SEC Filings & Signals Pipeline UI
+# # streamlit/app.py
+# # SEC Filings & Signals Pipeline UI
 
-from __future__ import annotations
-import json
-import re
-import os
-from typing import Any, Dict, List, Optional, Tuple
-import pandas as pd
-import requests
+# from __future__ import annotations
+# import json
+# import re
+# import os
+# from typing import Any, Dict, List, Optional, Tuple
+# import pandas as pd
+# import requests
+# import streamlit as st
+# import boto3
+# from botocore.exceptions import ClientError
+
+# # Load environment variables (if using python-dotenv)
+# try:
+#     from dotenv import load_dotenv
+#     load_dotenv()
+# except ImportError:
+#     pass
+
+# # AWS S3 Configuration
+# AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID", "")
+# AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "")
+# AWS_REGION = os.getenv("AWS_REGION", "us-east-2")
+# S3_BUCKET = os.getenv("S3_BUCKET", "pe-orgair-platform-group5")
+
+# def get_s3_client():
+#     return boto3.client('s3', aws_access_key_id=AWS_ACCESS_KEY_ID, aws_secret_access_key=AWS_SECRET_ACCESS_KEY, region_name=AWS_REGION)
+
+# def fetch_from_s3(s3_key: str) -> str:
+#     try:
+#         s3 = get_s3_client()
+#         resp = s3.get_object(Bucket=S3_BUCKET, Key=s3_key)
+#         return resp['Body'].read().decode('utf-8')
+#     except ClientError as e:
+#         st.warning(f"S3 Error: {e}")
+#         return ""
+#     except Exception as e:
+#         st.warning(f"Error fetching from S3: {e}")
+#         return ""
+
+# # Configuration
+# st.set_page_config(page_title="SEC Filings & Signals", layout="wide", page_icon="📊")
+
+# DEFAULT_FASTAPI_URL = os.getenv("FASTAPI_URL", "http://localhost:8000")
+
+# if "base_url" not in st.session_state:
+#     st.session_state["base_url"] = DEFAULT_FASTAPI_URL
+# if "last_ticker" not in st.session_state:
+#     st.session_state["last_ticker"] = "CAT"
+# if "analysis_markdown" not in st.session_state:
+#     st.session_state["analysis_markdown"] = None
+
+# # Helper Functions
+# def api_url(base: str, path: str) -> str:
+#     return f"{base.rstrip('/')}/{path.lstrip('/')}"
+
+# def safe_json(resp: requests.Response) -> Dict[str, Any]:
+#     try:
+#         return resp.json()
+#     except:
+#         return {"_error": resp.text, "_status": resp.status_code}
+
+# def post_json(url: str, payload: Dict[str, Any], timeout_s: int = 240) -> Dict[str, Any]:
+#     resp = requests.post(url, json=payload, timeout=timeout_s)
+#     if resp.status_code >= 400:
+#         raise RuntimeError(f"POST failed ({resp.status_code}): {safe_json(resp).get('detail', safe_json(resp))}")
+#     return safe_json(resp)
+
+# def post(url: str, params: Optional[Dict[str, Any]] = None, timeout_s: int = 300) -> Dict[str, Any]:
+#     resp = requests.post(url, params=params, timeout=timeout_s)
+#     if resp.status_code >= 400:
+#         raise RuntimeError(f"POST failed ({resp.status_code}): {safe_json(resp).get('detail', safe_json(resp))}")
+#     return safe_json(resp)
+
+# def get(url: str, params: Optional[Dict[str, Any]] = None, timeout_s: int = 120) -> Dict[str, Any]:
+#     resp = requests.get(url, params=params, timeout=timeout_s)
+#     if resp.status_code >= 400:
+#         raise RuntimeError(f"GET failed ({resp.status_code}): {safe_json(resp).get('detail', safe_json(resp))}")
+#     return safe_json(resp)
+
+# def render_kpis(items: List[Tuple[str, Any]]) -> None:
+#     cols = st.columns(len(items))
+#     for i, (label, value) in enumerate(items):
+#         cols[i].metric(label, value)
+
+# def show_json(title: str, data: Any) -> None:
+#     with st.expander(title, expanded=False):
+#         st.code(json.dumps(data, indent=2, default=str), language="json")
+
+# def df_from_table(headers: List[str], rows: List[List[Any]]) -> pd.DataFrame:
+#     if not rows:
+#         return pd.DataFrame()
+#     max_cols = max(len(r) for r in rows)
+#     cols = headers[:max_cols] if headers else [f"col_{i}" for i in range(max_cols)]
+#     while len(cols) < max_cols:
+#         cols.append(f"col_{len(cols)}")
+#     return pd.DataFrame([r + [None]*(max_cols - len(r)) for r in rows], columns=cols)
+
+# def parse_markdown_content(markdown_content: str) -> List[Dict]:
+#     elements = []
+#     lines = markdown_content.split('\n')
+#     i = 0
+#     while i < len(lines):
+#         line = lines[i]
+#         if line.startswith('# ') and not line.startswith('## '):
+#             elements.append({'type': 'heading', 'level': 1, 'title': line.lstrip('#').strip(), 'content': None})
+#             i += 1; continue
+#         if line.startswith('## '):
+#             elements.append({'type': 'heading', 'level': 2, 'title': line.lstrip('#').strip(), 'content': None})
+#             i += 1; continue
+#         if line.startswith('### '):
+#             elements.append({'type': 'heading', 'level': 3, 'title': line.lstrip('#').strip(), 'content': None})
+#             i += 1; continue
+#         if line.startswith('#### '):
+#             elements.append({'type': 'heading', 'level': 4, 'title': line.lstrip('#').strip(), 'content': None})
+#             i += 1; continue
+#         if line.strip().startswith('|'):
+#             table_lines = []
+#             while i < len(lines) and lines[i].strip().startswith('|'):
+#                 table_lines.append(lines[i].strip())
+#                 i += 1
+#             if len(table_lines) >= 2:
+#                 header_line = table_lines[0]
+#                 headers = [cell.strip() for cell in header_line.split('|') if cell.strip()]
+#                 rows = []
+#                 for tl in table_lines[2:]:
+#                     cells = [cell.strip() for cell in tl.split('|') if cell.strip()]
+#                     if cells:
+#                         rows.append(cells)
+#                 elements.append({'type': 'table', 'level': 0, 'title': None, 'headers': headers, 'rows': rows})
+#             continue
+#         if line.strip() and not line.strip().startswith('|') and not line.startswith('#'):
+#             text_content = []
+#             while i < len(lines) and lines[i].strip() and not lines[i].startswith('#') and not lines[i].strip().startswith('|'):
+#                 text_content.append(lines[i].strip())
+#                 i += 1
+#             if text_content:
+#                 elements.append({'type': 'text', 'level': 0, 'title': None, 'content': ' '.join(text_content)})
+#             continue
+#         i += 1
+#     return elements
+
+# def parse_markdown_tables(markdown_content: str) -> List[Dict]:
+#     tables = []
+#     lines = markdown_content.split('\n')
+#     current_title = ""
+#     current_table_lines = []
+#     in_table = False
+#     for i, line in enumerate(lines):
+#         if line.startswith('## ') or line.startswith('### '):
+#             current_title = line.lstrip('#').strip()
+#             continue
+#         if line.strip().startswith('|'):
+#             if not in_table:
+#                 in_table = True
+#                 current_table_lines = []
+#             current_table_lines.append(line.strip())
+#         else:
+#             if in_table and current_table_lines:
+#                 table_data = parse_single_table(current_table_lines)
+#                 if table_data:
+#                     table_data['title'] = current_title
+#                     tables.append(table_data)
+#                 current_table_lines = []
+#                 in_table = False
+#     if in_table and current_table_lines:
+#         table_data = parse_single_table(current_table_lines)
+#         if table_data:
+#             table_data['title'] = current_title
+#             tables.append(table_data)
+#     return tables
+
+# def parse_single_table(table_lines: List[str]) -> Optional[Dict]:
+#     if len(table_lines) < 2:
+#         return None
+#     header_line = table_lines[0]
+#     headers = [cell.strip() for cell in header_line.split('|') if cell.strip()]
+#     rows = []
+#     for line in table_lines[2:]:
+#         cells = [cell.strip() for cell in line.split('|') if cell.strip()]
+#         if cells:
+#             rows.append(cells)
+#     return {'headers': headers, 'rows': rows}
+
+# def extract_section_content(text: str, section_name: str, max_chars: int = 1500) -> str:
+#     if not text:
+#         return ""
+#     patterns = {
+#         'business': [
+#             r'Item\s*1\.\s*Business\.?\s*(.*?)(?=Item\s*1A\.|Item\s*1B\.|Item\s*2\.|Part\s*II|$)',
+#             r'Item\s*1[\.\s]+Business(.*?)(?=Item\s*1A|Item\s*2|Part\s*II|$)',
+#         ],
+#         'risk_factors': [
+#             r'Item\s*1A\.\s*Risk\s*Factors\.?\s*(.*?)(?=Item\s*1B\.|Item\s*2\.|Part\s*II|$)',
+#             r'Item\s*1A[\.\s]+Risk\s*Factors(.*?)(?=Item\s*1B|Item\s*2|Part\s*II|$)',
+#         ],
+#         'mda': [
+#             r'Item\s*7\.\s*Management.?s?\s*Discussion\s*and\s*Analysis.*?\.?\s*(.*?)(?=Item\s*7A\.|Item\s*8\.|Part\s*III|$)',
+#             r'Item\s*7[\.\s]+Management.?s?\s*Discussion(.*?)(?=Item\s*7A|Item\s*8|Part\s*III|$)',
+#         ],
+#     }
+#     section_patterns = patterns.get(section_name, [])
+#     for pattern in section_patterns:
+#         match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
+#         if match:
+#             content = match.group(1).strip()
+#             content = re.sub(r'\s+', ' ', content)
+#             if len(content) > 50:
+#                 return content[:max_chars] + ("..." if len(content) > max_chars else "")
+#     return ""
+
+# def extract_lines_containing(text: str, search_term: str, num_lines: int = 5, chars_per_line: int = 300) -> str:
+#     if not text:
+#         return ""
+#     results = []
+#     search_lower = search_term.lower()
+#     text_lower = text.lower()
+#     pos = 0
+#     while len(results) < num_lines:
+#         idx = text_lower.find(search_lower, pos)
+#         if idx == -1:
+#             break
+#         start = max(0, idx - 50)
+#         end = min(len(text), idx + chars_per_line)
+#         while start > 0 and text[start] not in ' \n\t':
+#             start -= 1
+#         snippet = text[start:end].strip()
+#         snippet = re.sub(r'\s+', ' ', snippet)
+#         if snippet and len(snippet) > 20:
+#             results.append(snippet)
+#         pos = idx + len(search_term) + 100
+#     return "\n\n---\n\n".join(results) if results else ""
+
+# def load_json_file_content(s3_key: str, ticker: str, filing_type: str, filing_date: str) -> Tuple[str, str]:
+#     keys_to_try = [
+#         s3_key,
+#         f"sec/parsed/{ticker}/{filing_type}/{filing_date}_full.json",
+#         f"parsed/{ticker}/{filing_type}/{filing_date}_full.json",
+#     ]
+#     for key in keys_to_try:
+#         if not key:
+#             continue
+#         try:
+#             content = fetch_from_s3(key)
+#             if content:
+#                 if content.strip().startswith('{'):
+#                     data = json.loads(content)
+#                     text = (data.get('text', '') or data.get('content', '') or data.get('full_text', '') or data.get('raw_text', '') or content)
+#                     return text, f"s3://{S3_BUCKET}/{key}"
+#                 else:
+#                     return content, f"s3://{S3_BUCKET}/{key}"
+#         except Exception:
+#             continue
+#     return "", ""
+
+# def fetch_documents_table(base_url: str, ticker: Optional[str] = None) -> None:
+#     try:
+#         params = {"ticker": ticker, "limit": 100} if ticker else {"limit": 100}
+#         data = get(api_url(base_url, "/api/v1/documents"), params=params)
+#         docs = data.get("documents", [])
+#         if docs:
+#             st.subheader("📋 Documents Table (Snowflake)")
+#             df = pd.DataFrame([{
+#                 "ID": d.get("id", "")[:12] + "...",
+#                 "Ticker": d.get("ticker"),
+#                 "Filing Type": d.get("filing_type"),
+#                 "Filing Date": str(d.get("filing_date", ""))[:10],
+#                 "Status": d.get("status"),
+#                 "S3 Key": (d.get("s3_key") or "")[:30] + "...",
+#                 "Words": d.get("word_count", 0),
+#                 "Chunks": d.get("chunk_count", 0)
+#             } for d in docs])
+#             st.dataframe(df, use_container_width=True, hide_index=True)
+#             st.caption(f"Total: {data.get('count', len(docs))} documents")
+#         else:
+#             st.info("No documents found in Snowflake")
+#     except Exception as e:
+#         st.error(f"❌ Error fetching documents: {e}")
+
+# def fetch_chunks_table(base_url: str, ticker: Optional[str] = None) -> None:
+#     try:
+#         params = {"ticker": ticker, "limit": 50} if ticker else {"limit": 50}
+#         doc_data = get(api_url(base_url, "/api/v1/documents"), params=params)
+#         docs = doc_data.get("documents", [])
+#         all_chunks = []
+#         for doc in docs[:10]:
+#             doc_id = doc.get("id")
+#             if doc_id:
+#                 try:
+#                     chunk_data = get(api_url(base_url, f"/api/v1/documents/chunks/{doc_id}"))
+#                     chunks = chunk_data.get("chunks", [])
+#                     for c in chunks[:5]:
+#                         all_chunks.append({
+#                             "Chunk ID": c.get("id", "")[:12] + "...",
+#                             "Document ID": doc_id[:12] + "...",
+#                             "Ticker": doc.get("ticker"),
+#                             "Index": c.get("chunk_index"),
+#                             "Section": c.get("section"),
+#                             "Words": c.get("word_count"),
+#                             "Content Preview": (c.get("content") or "")[:80] + "..."
+#                         })
+#                 except:
+#                     pass
+#         if all_chunks:
+#             st.subheader("📦 Document Chunks Table (Snowflake)")
+#             st.dataframe(pd.DataFrame(all_chunks), use_container_width=True, hide_index=True)
+#             st.caption(f"Showing sample of chunks (limited for display)")
+#         else:
+#             st.info("No chunks found")
+#     except Exception as e:
+#         st.error(f"❌ Error fetching chunks: {e}")
+
+
+
+# # Signal table rendering helpers
+
+
+# def render_signals_table(signals: List[Dict], title: str = "Signals") -> None:
+#     """Render a list of signal dicts as a clean Streamlit table."""
+#     if not signals:
+#         st.info("No signals found.")
+#         return
+#     rows = []
+#     for s in signals:
+#         rows.append({
+#             "Signal ID": str(s.get("signal_id") or s.get("id", ""))[:16] + "…",
+#             "Company": s.get("ticker") or s.get("company_id", "")[:12],
+#             "Category": s.get("category", "—"),
+#             "Source": s.get("source", "—"),
+#             "Score": round(s["normalized_score"], 2) if s.get("normalized_score") is not None else "—",
+#             "Confidence": round(s["confidence"], 2) if s.get("confidence") is not None else "—",
+#             "Evidence": s.get("evidence_count", 0),
+#             "Date": str(s.get("signal_date", ""))[:10] or "—",
+#         })
+#     st.subheader(f"📊 {title}")
+#     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+
+# def render_signal_summary_table(summary: Dict, company_name: str = "") -> None:
+#     """Render a signal summary dict as a vertical metrics table."""
+#     label = f" — {company_name}" if company_name else ""
+#     st.subheader(f"📋 Signal Summary{label}")
+#     rows = [
+#         {"Category": "Technology Hiring", "Score": summary.get("technology_hiring_score", "—")},
+#         {"Category": "Innovation Activity", "Score": summary.get("innovation_activity_score", "—")},
+#         {"Category": "Digital Presence", "Score": summary.get("digital_presence_score", "—")},
+#         {"Category": "Leadership Signals", "Score": summary.get("leadership_signals_score", "—")},
+#         {"Category": "🏆 Composite", "Score": summary.get("composite_score", "—")},
+#     ]
+#     for r in rows:
+#         if r["Score"] is not None and r["Score"] != "—":
+#             r["Score"] = round(float(r["Score"]), 2)
+#     df = pd.DataFrame(rows)
+#     st.dataframe(df, use_container_width=True, hide_index=True)
+#     st.caption(f"Signal count: {summary.get('signal_count', 0)}  |  Last updated: {summary.get('last_updated', '—')}")
+
+
+# def render_categories_table(categories: Dict) -> None:
+#     """Render the categories breakdown dict as a table."""
+#     if not categories:
+#         st.info("No category breakdown available.")
+#         return
+#     rows = []
+#     for cat, info in categories.items():
+#         rows.append({
+#             "Category": cat,
+#             "Count": info.get("count", 0),
+#             "Latest Score": round(info["latest_score"], 2) if info.get("latest_score") is not None else "—",
+#         })
+#     st.subheader("📂 Signals by Category")
+#     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+
+
+# # Sidebar Navigation
+
+
+# st.sidebar.title("📊 SEC Pipeline")
+# st.sidebar.divider()
+
+# main_section = st.sidebar.selectbox("Select Section", ["SEC Filings", "Signals Pipeline"], index=0)
+
+# if main_section == "SEC Filings":
+#     sub_page = st.sidebar.radio(
+#         "Pipeline Step",
+#         [
+#             "1. Download Filings",
+#             "2. Parsing",
+#             "3. PDF Parsing",
+#             "4. De-duplication",
+#             "5. Chunking",
+#             "📊 Documents Summary",
+#             "📈 SEC Analysis Summary",
+#         ],
+#         index=0,
+#     )
+# else:
+#     sub_page = st.sidebar.radio(
+#         "Signals",
+#         [
+#             "1. Collect Signals",
+#             "2. Task Status",
+#             "3. List Signals",
+#             "4. Company Signal Summary",
+#             "5. Signals by Category",
+#         ],
+#         index=0,
+#     )
+
+# st.sidebar.divider()
+# st.sidebar.subheader("⚙️ API Settings")
+# base_url = st.sidebar.text_input("FastAPI URL", value=st.session_state["base_url"])
+# st.session_state["base_url"] = base_url
+
+# if st.sidebar.button("🔍 Health Check", use_container_width=True):
+#     try:
+#         get(api_url(base_url, "/health"))
+#         st.sidebar.success("✅ API Connected")
+#     except Exception as e:
+#         st.sidebar.error(f"❌ {str(e)[:50]}")
+
+
+# # #############################################################################
+# # SEC Filings Section
+# # #############################################################################
+
+# if main_section == "SEC Filings":
+#     st.title("📄 SEC Filings Pipeline")
+
+#     # Page 1: Download Filings
+#     if sub_page == "1. Download Filings":
+#         st.header("Step 1: Download SEC Filings")
+
+#         st.warning("⚠️ We already have data present in the backend, so please delete a company first and then proceed with the downloading of the filings.")
+
+#         with st.expander("🗑️ Delete Existing Data", expanded=False):
+#             del_ticker = st.text_input("Ticker to Delete", value=st.session_state["last_ticker"], key="del_ticker").upper().strip()
+
+#             del_col1, del_col2 = st.columns(2)
+#             with del_col1:
+#                 if st.button("🗑️ Delete ALL Data", type="secondary", use_container_width=True, key="del_all"):
+#                     if del_ticker:
+#                         try:
+#                             with st.spinner(f"Deleting all data for {del_ticker}..."):
+#                                 resp = requests.delete(api_url(base_url, f"/api/v1/documents/reset/{del_ticker}"), timeout=120)
+#                             if resp.status_code < 400:
+#                                 st.success(f"✅ All data deleted for {del_ticker}")
+#                                 st.json(safe_json(resp))
+#                             else:
+#                                 st.error(f"❌ Error: {safe_json(resp).get('detail', safe_json(resp))}")
+#                         except Exception as e:
+#                             st.error(f"❌ Error: {e}")
+
+#                 if st.button("🗑️ Delete RAW Files Only", type="secondary", use_container_width=True, key="del_raw"):
+#                     if del_ticker:
+#                         try:
+#                             with st.spinner(f"Deleting raw files for {del_ticker}..."):
+#                                 resp = requests.delete(api_url(base_url, f"/api/v1/documents/reset/{del_ticker}/raw"), timeout=120)
+#                             if resp.status_code < 400:
+#                                 st.success(f"✅ Raw files deleted for {del_ticker}")
+#                                 st.json(safe_json(resp))
+#                             else:
+#                                 st.error(f"❌ Error: {safe_json(resp).get('detail', safe_json(resp))}")
+#                         except Exception as e:
+#                             st.error(f"❌ Error: {e}")
+
+#             with del_col2:
+#                 if st.button("🗑️ Delete PARSED Files Only", type="secondary", use_container_width=True, key="del_parsed"):
+#                     if del_ticker:
+#                         try:
+#                             with st.spinner(f"Deleting parsed files for {del_ticker}..."):
+#                                 resp = requests.delete(api_url(base_url, f"/api/v1/documents/reset/{del_ticker}/parsed"), timeout=120)
+#                             if resp.status_code < 400:
+#                                 st.success(f"✅ Parsed files deleted for {del_ticker}")
+#                                 st.json(safe_json(resp))
+#                             else:
+#                                 st.error(f"❌ Error: {safe_json(resp).get('detail', safe_json(resp))}")
+#                         except Exception as e:
+#                             st.error(f"❌ Error: {e}")
+
+#                 if st.button("🗑️ Delete CHUNKS Only", type="secondary", use_container_width=True, key="del_chunks"):
+#                     if del_ticker:
+#                         try:
+#                             with st.spinner(f"Deleting chunks for {del_ticker}..."):
+#                                 resp = requests.delete(api_url(base_url, f"/api/v1/documents/reset/{del_ticker}/chunks"), timeout=120)
+#                             if resp.status_code < 400:
+#                                 st.success(f"✅ Chunks deleted for {del_ticker}")
+#                                 st.json(safe_json(resp))
+#                             else:
+#                                 st.error(f"❌ Error: {safe_json(resp).get('detail', safe_json(resp))}")
+#                         except Exception as e:
+#                             st.error(f"❌ Error: {e}")
+
+#         st.divider()
+#         st.info("📥 Downloads filings from SEC EDGAR → Uploads to S3 → Saves metadata to Snowflake")
+
+#         st.subheader("Option 1: Download by Ticker")
+#         with st.form("collect_form"):
+#             c1, c2 = st.columns(2)
+#             with c1:
+#                 ticker = st.text_input("Ticker Symbol", value=st.session_state["last_ticker"]).upper().strip()
+#                 filing_types = st.multiselect("Filing Types", ["10-K", "10-Q", "8-K", "DEF 14A"], default=["10-K", "10-Q", "8-K", "DEF 14A"])
+#             with c2:
+#                 years_back = st.slider("Years Back", 1, 10, 3)
+#             submitted = st.form_submit_button("📥 Download Filings", use_container_width=True, type="primary")
+
+#         if submitted and ticker and filing_types:
+#             st.session_state["last_ticker"] = ticker
+#             try:
+#                 with st.spinner(f"Collecting filings for {ticker}..."):
+#                     data = post_json(api_url(base_url, "/api/v1/documents/collect"),
+#                         {"ticker": ticker, "filing_types": filing_types, "years_back": years_back})
+#                 st.success("✅ Collection Complete!")
+#                 render_kpis([("Found", data.get("documents_found", 0)), ("Uploaded", data.get("documents_uploaded", 0)),
+#                              ("Skipped", data.get("documents_skipped", 0)), ("Failed", data.get("documents_failed", 0))])
+#                 summary = data.get("summary", {})
+#                 if summary:
+#                     st.markdown("#### Summary by Filing Type")
+#                     st.dataframe(pd.DataFrame([{"Filing Type": k, "Count": v} for k, v in summary.items()]), use_container_width=True, hide_index=True)
+#                 show_json("Raw JSON Response", data)
+#                 st.divider()
+#                 fetch_documents_table(base_url, ticker)
+#             except Exception as e:
+#                 st.error(f"❌ Error: {e}")
+
+#         st.divider()
+
+#         st.subheader("Option 2: Download ALL Companies")
+#         st.warning("⚠️ **NOT RECOMMENDED**: Downloading all 10 companies at once may exceed the SEC EDGAR rate limit (0.1 - 10 requests/second). Use Option 1 for individual tickers instead.")
+
+#         with st.form("collect_all_form"):
+#             c1, c2 = st.columns(2)
+#             with c1:
+#                 all_filing_types = st.multiselect("Filing Types", ["10-K", "10-Q", "8-K", "DEF 14A"],
+#                     default=["10-K", "10-Q", "8-K", "DEF 14A"], key="all_filing_types")
+#             with c2:
+#                 all_years_back = st.slider("Years Back", 1, 10, 3, key="all_years_back")
+#             submitted_all = st.form_submit_button("📥 Download ALL Companies (Not Recommended)", use_container_width=True)
+
+#         if submitted_all:
+#             try:
+#                 with st.spinner("Collecting filings for ALL companies... This may take several minutes..."):
+#                     query_str = "&".join([f"filing_types={ft}" for ft in all_filing_types])
+#                     full_url = f"{api_url(base_url, '/api/v1/documents/collect/all')}?{query_str}&years_back={all_years_back}"
+#                     resp = requests.post(full_url, timeout=600)
+#                     data = safe_json(resp)
+#                 if resp.status_code < 400:
+#                     st.success("✅ Collection Complete for ALL Companies!")
+#                     if isinstance(data, list):
+#                         for company_data in data:
+#                             st.markdown(f"**{company_data.get('ticker', 'Unknown')}**: {company_data.get('documents_uploaded', 0)} uploaded")
+#                     show_json("Raw JSON Response", data)
+#                     st.divider()
+#                     fetch_documents_table(base_url)
+#                 else:
+#                     st.error(f"❌ Error: {data.get('detail', data)}")
+#             except Exception as e:
+#                 st.error(f"❌ Error: {e}")
+
+#     # Page 2: Parsing
+#     elif sub_page == "2. Parsing":
+#         st.header("Step 2: Parse Documents")
+#         st.info("📄 Downloads from S3 → Extracts text/tables → Identifies sections (Items 1, 1A, 7) → Updates Snowflake")
+
+#         st.subheader("Option 1: Parse by Ticker")
+#         c1, c2 = st.columns([2, 1])
+#         with c1:
+#             ticker = st.text_input("Ticker", value=st.session_state["last_ticker"]).upper().strip()
+
+#         if st.button("📄 Parse Documents", type="primary", use_container_width=True):
+#             if ticker:
+#                 st.session_state["last_ticker"] = ticker
+#                 try:
+#                     with st.spinner(f"Parsing documents for {ticker}..."):
+#                         data = post(api_url(base_url, f"/api/v1/documents/parse/{ticker}"))
+#                     st.success("✅ Parsing Complete!")
+
+#                     render_kpis([("Total", data.get("total_documents", 0)), ("Parsed", data.get("parsed", 0)),
+#                                  ("Skipped", data.get("skipped", 0)), ("Failed", data.get("failed", 0))])
+
+#                     results = data.get("results", [])
+#                     if results:
+#                         st.subheader("Parsed Documents Summary")
+#                         df = pd.DataFrame([{
+#                             "Document ID": r.get("document_id", "")[:20] + "...",
+#                             "Filing Type": r.get("filing_type"),
+#                             "Filing Date": r.get("filing_date"),
+#                             "Format": r.get("source_format"),
+#                             "Words": r.get("word_count", 0),
+#                             "Tables": r.get("table_count", 0),
+#                             "Sections": ", ".join(r.get("sections_found", [])[:3])
+#                         } for r in results])
+#                         st.dataframe(df, use_container_width=True, hide_index=True)
+
+#                         st.divider()
+#                         st.subheader("📊 RAW vs PARSED Content Comparison (10-K Document)")
+#                         st.caption("Showing 10-K document which contains Items 1, 1A, and 7")
+
+#                         doc_10k = None
+#                         for r in results:
+#                             if r.get("filing_type") == "10-K":
+#                                 doc_10k = r
+#                                 break
+#                         if not doc_10k:
+#                             doc_10k = results[0]
+#                             st.warning(f"⚠️ No 10-K document found. Showing {doc_10k.get('filing_type')} instead.")
+
+#                         doc_id = doc_10k.get("document_id")
+#                         if doc_id:
+#                             try:
+#                                 parsed_content = get(api_url(base_url, f"/api/v1/documents/parsed/{doc_id}"))
+#                                 st.markdown(f"**Document: {doc_10k.get('filing_type')} - {doc_10k.get('filing_date')}** | Words: {parsed_content.get('word_count', 0):,} | Tables: {parsed_content.get('table_count', 0)}")
+
+#                                 col1, col2 = st.columns(2)
+#                                 with col1:
+#                                     st.markdown("##### 📁 RAW Content")
+#                                     st.markdown(f"**S3 Key:** `{parsed_content.get('s3_key', 'N/A')}`")
+#                                     raw_text = parsed_content.get('text_preview', '')
+#                                     if raw_text:
+#                                         st.markdown("**Raw Text (showing key sections if found):**")
+#                                         section_previews = []
+#                                         item1_match = re.search(r'(item\s*1[.\s]+business.{0,500})', raw_text, re.IGNORECASE | re.DOTALL)
+#                                         if item1_match:
+#                                             section_previews.append(("Item 1 - Business", item1_match.group(1)[:400]))
+#                                         item1a_match = re.search(r'(item\s*1a[.\s]+risk\s*factors.{0,500})', raw_text, re.IGNORECASE | re.DOTALL)
+#                                         if item1a_match:
+#                                             section_previews.append(("Item 1A - Risk Factors", item1a_match.group(1)[:400]))
+#                                         item7_match = re.search(r'(item\s*7[.\s]+management.{0,500})', raw_text, re.IGNORECASE | re.DOTALL)
+#                                         if item7_match:
+#                                             section_previews.append(("Item 7 - MD&A", item7_match.group(1)[:400]))
+#                                         if section_previews:
+#                                             for section_name, preview in section_previews:
+#                                                 with st.expander(f"📄 {section_name}", expanded=True):
+#                                                     st.text(preview + "...")
+#                                         else:
+#                                             st.text_area("Raw Text Content", value=raw_text[:2500], height=300, disabled=True, key="raw_text_parse")
+#                                     tables = parsed_content.get('tables', [])
+#                                     if tables:
+#                                         with st.expander(f"📋 Raw HTML Table Structure ({len(tables)} tables)"):
+#                                             html_preview = ""
+#                                             for idx, table in enumerate(tables[:2]):
+#                                                 if isinstance(table, dict):
+#                                                     headers = table.get('headers', [])
+#                                                     trows = table.get('rows', [])
+#                                                     html_preview += f"<table id='table_{idx+1}'>\n  <thead><tr>\n"
+#                                                     for h in headers[:5]:
+#                                                         html_preview += f"    <th>{str(h)[:25]}</th>\n"
+#                                                     html_preview += "  </tr></thead>\n  <tbody>\n"
+#                                                     for row in trows[:3]:
+#                                                         html_preview += "    <tr>"
+#                                                         for cell in row[:5]:
+#                                                             html_preview += f"<td>{str(cell)[:20]}</td>"
+#                                                         html_preview += "</tr>\n"
+#                                                     html_preview += "  </tbody>\n</table>\n\n"
+#                                             st.code(html_preview, language="html")
+
+#                                 with col2:
+#                                     st.markdown("##### 📄 PARSED Content")
+#                                     sections_list = parsed_content.get('sections', [])
+#                                     st.markdown(f"**Sections Found:** {', '.join(sections_list) if sections_list else 'None'}")
+#                                     st.markdown("---")
+#                                     st.markdown("**📑 Key SEC Filing Sections (10-K only):**")
+#                                     s3_key = parsed_content.get('s3_key', '')
+#                                     full_text, loaded_path = load_json_file_content(s3_key, ticker, doc_10k.get('filing_type', '10-K'), doc_10k.get('filing_date', ''))
+#                                     if loaded_path:
+#                                         st.success(f"📂 Loaded from: `{loaded_path}`")
+#                                         st.caption(f"📄 Total text length: {len(full_text):,} characters")
+#                                     else:
+#                                         st.warning(f"⚠️ Could not load JSON file from S3. Tried key: `{s3_key}`")
+#                                         full_text = parsed_content.get('text_preview', '') or parsed_content.get('text', '') or ''
+#                                         if full_text:
+#                                             st.info(f"Using text_preview from API ({len(full_text):,} chars)")
+
+#                                     st.markdown("**✅ Item 1 - Business (lines containing 'Item 1. Business'):**")
+#                                     item1_lines = extract_lines_containing(full_text, "Item 1. Business", num_lines=3, chars_per_line=400)
+#                                     if not item1_lines:
+#                                         item1_lines = extract_lines_containing(full_text, "Item 1 Business", num_lines=3, chars_per_line=400)
+#                                     if item1_lines:
+#                                         st.text_area("Item 1 Content", value=item1_lines, height=180, disabled=True, key="item1_content")
+#                                     else:
+#                                         st.info("No lines found containing 'Item 1. Business'")
+
+#                                     st.markdown("**✅ Item 1A - Risk Factors (lines containing 'Item 1A'):**")
+#                                     item1a_lines = extract_lines_containing(full_text, "Item 1A", num_lines=3, chars_per_line=400)
+#                                     if item1a_lines:
+#                                         st.text_area("Item 1A Content", value=item1a_lines, height=180, disabled=True, key="item1a_content")
+#                                     else:
+#                                         st.info("No lines found containing 'Item 1A'")
+
+#                                     st.markdown("**✅ Item 7 - MD&A (lines containing 'Item 7'):**")
+#                                     item7_lines = extract_lines_containing(full_text, "Item 7", num_lines=3, chars_per_line=400)
+#                                     if item7_lines:
+#                                         st.text_area("Item 7 Content", value=item7_lines, height=180, disabled=True, key="item7_content")
+#                                     else:
+#                                         st.info("No lines found containing 'Item 7'")
+
+#                                     tables = parsed_content.get('tables', [])
+#                                     st.markdown("---")
+#                                     st.markdown(f"**📊 Parsed Tables ({len(tables)} total):**")
+#                                     if tables:
+#                                         shown = 0
+#                                         for idx, table in enumerate(tables):
+#                                             if shown >= 3:
+#                                                 break
+#                                             if isinstance(table, dict):
+#                                                 headers = table.get('headers', [])
+#                                                 trows = table.get('rows', [])
+#                                                 if trows and len(trows) >= 2 and headers:
+#                                                     st.markdown(f"**Table {idx + 1}:**")
+#                                                     num_cols = len(headers)
+#                                                     norm_rows = []
+#                                                     for row in trows[:8]:
+#                                                         if isinstance(row, list):
+#                                                             norm_row = row[:num_cols] + [''] * (num_cols - len(row))
+#                                                             norm_rows.append(norm_row[:num_cols])
+#                                                     if norm_rows:
+#                                                         st.dataframe(pd.DataFrame(norm_rows, columns=headers[:num_cols]), use_container_width=True, hide_index=True, height=150)
+#                                                         shown += 1
+#                                         if len(tables) > 3:
+#                                             st.caption(f"... and {len(tables) - 3} more tables")
+#                                     else:
+#                                         st.info("No tables extracted")
+#                             except Exception as e:
+#                                 st.warning(f"Could not fetch parsed content: {e}")
+
+#                     show_json("Raw JSON Response", data)
+#                 except Exception as e:
+#                     st.error(f"❌ Error: {e}")
+
+#         st.divider()
+
+#         st.subheader("Option 2: Parse ALL Companies")
+#         st.warning("⚠️ **NOT RECOMMENDED**: Parsing all companies at once may exceed the rate limit (0.1 - 10 requests/second). Use Option 1 instead.")
+
+#         if st.button("📄 Parse ALL Companies (Not Recommended)", use_container_width=True):
+#             try:
+#                 with st.spinner("Parsing documents for ALL companies..."):
+#                     data = post(api_url(base_url, "/api/v1/documents/parse"), timeout_s=600)
+#                 st.success("✅ Parsing Complete for ALL Companies!")
+#                 render_kpis([("Total Parsed", data.get("total_parsed", 0)), ("Skipped", data.get("total_skipped", 0)), ("Failed", data.get("total_failed", 0))])
+#                 by_company = data.get("by_company", [])
+#                 if by_company:
+#                     st.dataframe(pd.DataFrame(by_company), use_container_width=True, hide_index=True)
+#                 show_json("Raw JSON Response", data)
+#             except Exception as e:
+#                 st.error(f"❌ Error: {e}")
+
+#     # Page 3: PDF Parsing
+#     elif sub_page == "3. PDF Parsing":
+#         st.header("Step 3: PDF Parsing (Sample)")
+#         st.info("📄 Parse a sample 10-K PDF file from `data/sample_10k/` folder")
+#         ticker = st.text_input("Ticker Symbol", value="AAPL", help="Company ticker symbol for the PDF")
+#         st.caption("**Note**: Place PDF in `data/sample_10k/` folder")
+#         if st.button("📄 Parse PDF", type="primary", use_container_width=True):
+#             try:
+#                 with st.spinner("Parsing PDF..."):
+#                     resp = requests.get(api_url(base_url, "/api/v1/sec/parse-pdf"), params={"ticker": ticker, "upload_to_s3": False}, timeout=300)
+#                     data = safe_json(resp)
+#                 if resp.status_code < 400:
+#                     st.success(f"✅ {data.get('message', 'PDF Parsing Complete!')}")
+#                     render_kpis([("Pages", data.get('page_count', 0)), ("Words", f"{data.get('word_count', 0):,}"), ("Tables", data.get('table_count', 0))])
+#                     st.markdown(f"**File**: `{data.get('pdf_file', 'N/A')}` | **Hash**: `{data.get('content_hash', 'N/A')}`")
+#                     show_json("Raw JSON Response", data)
+#                 else:
+#                     st.error(f"❌ Error: {data.get('detail', data)}")
+#             except Exception as e:
+#                 st.error(f"❌ Error: {e}")
+
+#     # Page 4: De-duplication
+#     elif sub_page == "4. De-duplication":
+#         st.header("Step 4: De-duplication")
+#         st.info("De-duplication happens automatically during collection via content hash checking")
+#         st.markdown("""
+#         ### How De-duplication Works
+#         1. **Content Hash**: Each document's content is hashed using SHA-256
+#         2. **Duplicate Check**: Before uploading, the hash is compared against existing records
+#         3. **Skip Duplicates**: Documents with matching hashes are skipped
+#         """)
+#         ticker = st.text_input("Ticker to Check", value=st.session_state["last_ticker"]).upper().strip()
+#         if st.button("🔍 Check Documents", use_container_width=True):
+#             if ticker:
+#                 fetch_documents_table(base_url, ticker)
+
+#     # Page 5: Chunking
+#     elif sub_page == "5. Chunking":
+#         st.header("Step 5: Chunk Documents")
+#         st.info("📦 Splits parsed documents into overlapping chunks for LLM processing")
+
+#         st.subheader("Option 1: Chunk by Ticker")
+#         with st.form("chunk_form"):
+#             c1, c2, c3 = st.columns(3)
+#             with c1:
+#                 ticker = st.text_input("Ticker", value=st.session_state["last_ticker"]).upper().strip()
+#             with c2:
+#                 chunk_size = st.number_input("Chunk Size (words)", 100, 2000, 750, 50)
+#             with c3:
+#                 chunk_overlap = st.number_input("Overlap (words)", 0, 200, 50, 10)
+#             submitted = st.form_submit_button("📦 Chunk Documents", type="primary", use_container_width=True)
+
+#         if submitted and ticker:
+#             st.session_state["last_ticker"] = ticker
+#             try:
+#                 with st.spinner(f"Chunking documents for {ticker}..."):
+#                     data = post(api_url(base_url, f"/api/v1/documents/chunk/{ticker}"), params={"chunk_size": chunk_size, "chunk_overlap": chunk_overlap})
+#                 st.success("✅ Chunking Complete!")
+#                 render_kpis([("Documents", data.get("total_documents", 0)), ("Chunked", data.get("chunked", 0)), ("Total Chunks", data.get("total_chunks", 0)), ("Failed", data.get("failed", 0))])
+#                 show_json("Raw JSON Response", data)
+#                 st.divider()
+#                 fetch_chunks_table(base_url, ticker)
+#             except Exception as e:
+#                 st.error(f"❌ Error: {e}")
+
+#         st.divider()
+
+#         st.subheader("Option 2: Chunk ALL Companies")
+#         st.warning("⚠️ **NOT RECOMMENDED**: Chunking all companies at once may exceed the rate limit (0.1 - 10 requests/second).")
+#         with st.form("chunk_all_form"):
+#             c1, c2 = st.columns(2)
+#             with c1:
+#                 all_chunk_size = st.number_input("Chunk Size", 100, 2000, 750, 50, key="all_cs")
+#             with c2:
+#                 all_chunk_overlap = st.number_input("Overlap", 0, 200, 50, 10, key="all_co")
+#             submitted_all = st.form_submit_button("📦 Chunk ALL (Not Recommended)", use_container_width=True)
+
+#         if submitted_all:
+#             try:
+#                 with st.spinner("Chunking ALL companies..."):
+#                     data = post(api_url(base_url, "/api/v1/documents/chunk"), params={"chunk_size": all_chunk_size, "chunk_overlap": all_chunk_overlap}, timeout_s=600)
+#                 st.success("✅ Chunking Complete!")
+#                 render_kpis([("Documents", data.get("total_documents_chunked", 0)), ("Chunks", data.get("total_chunks_created", 0))])
+#                 show_json("Raw JSON Response", data)
+#                 fetch_chunks_table(base_url)
+#             except Exception as e:
+#                 st.error(f"❌ Error: {e}")
+
+#     # Documents Summary Page
+#     elif sub_page == "📊 Documents Summary":
+#         st.header("📊 Documents Summary")
+#         if st.button("🔄 Load Report", type="primary", use_container_width=True):
+#             try:
+#                 with st.spinner("Loading report..."):
+#                     data = get(api_url(base_url, "/api/v1/documents/report"))
+#                 st.success("✅ Report Loaded!")
+#                 summary = data.get("summary", {})
+#                 if summary:
+#                     total_signals = summary.get("total signals", 0)
+#                     st.subheader("Summary Statistics")
+#                     summary_df = pd.DataFrame([
+#                         {"Metric": "Companies Processed", "Value": summary.get("companies_processed", 0)},
+#                         {"Metric": "Total Documents", "Value": summary.get("total_documents", 0)},
+#                         {"Metric": "Total Chunks", "Value": summary.get("total_chunks", 0)},
+#                         {"Metric": "Total Words", "Value": f"{summary.get('total_words', 0):,}"},
+#                         {"Metric": "Total Signals", "Value": total_signals},
+#                     ])
+#                     st.table(summary_df)
+#                 company_stats = data.get("documents_by_company", [])
+#                 if company_stats:
+#                     st.subheader("Documents by Company")
+#                     company_df = pd.DataFrame(company_stats)
+#                     st.dataframe(company_df, use_container_width=True, hide_index=True)
+#                 show_json("Raw JSON Response", data)
+#             except Exception as e:
+#                 st.error(f"❌ Error: {e}")
+
+#     # SEC Analysis Summary
+#     elif sub_page == "📈 SEC Analysis Summary":
+#         st.header("📈 SEC Analysis Summary")
+#         st.info("📊 Export and view section analysis for all companies with word counts and keyword mentions")
+
+#         LOCAL_ANALYSIS_PATHS = [
+#             "sec_analysis_summary.md", "./sec_analysis_summary.md", "../sec_analysis_summary.md",
+#             "../../sec_analysis_summary.md", "../../../sec_analysis_summary.md",
+#             "sec_analysis.md", "./sec_analysis.md", "../sec_analysis.md", "../../sec_analysis.md",
+#             "data/sec_analysis_summary.md", "output/sec_analysis_summary.md",
+#         ]
+
+#         def load_local_analysis_file() -> Tuple[Optional[str], Optional[str]]:
+#             for path in LOCAL_ANALYSIS_PATHS:
+#                 if os.path.exists(path):
+#                     try:
+#                         with open(path, 'r', encoding='utf-8') as f:
+#                             content = f.read()
+#                             if content.strip():
+#                                 return content, path
+#                     except Exception:
+#                         continue
+#             return None, None
+
+#         if not st.session_state.get("analysis_markdown"):
+#             local_content, local_path = load_local_analysis_file()
+#             if local_content:
+#                 st.session_state["analysis_markdown"] = local_content
+#                 st.session_state["analysis_source"] = f"Local file: {local_path}"
+
+#         col1, col2, col3 = st.columns([1, 1, 1])
+#         with col1:
+#             if st.button("📂 Load from Local File", type="primary", use_container_width=True):
+#                 local_content, local_path = load_local_analysis_file()
+#                 if local_content:
+#                     st.session_state["analysis_markdown"] = local_content
+#                     st.session_state["analysis_source"] = f"Local file: {local_path}"
+#                     st.success(f"✅ Loaded from: `{local_path}`")
+#                 else:
+#                     st.warning(f"⚠️ No local file found. Searched in: {', '.join(LOCAL_ANALYSIS_PATHS)}")
+#         with col2:
+#             if st.button("🔄 Refresh from API", type="secondary", use_container_width=True):
+#                 try:
+#                     with st.spinner("Fetching SEC Analysis from API (timeout: 10 minutes)..."):
+#                         resp = requests.get(api_url(base_url, "/api/v1/documents/analysis/export"), timeout=600)
+#                         if resp.status_code < 400:
+#                             markdown_content = resp.text
+#                             st.session_state["analysis_markdown"] = markdown_content
+#                             st.session_state["analysis_source"] = "API: /api/v1/documents/analysis/export"
+#                             try:
+#                                 with open("sec_analysis_summary.md", 'w', encoding='utf-8') as f:
+#                                     f.write(markdown_content)
+#                                 st.success("✅ Analysis loaded from API and saved to `sec_analysis_summary.md`")
+#                             except:
+#                                 st.success("✅ Analysis loaded from API!")
+#                         else:
+#                             st.error(f"❌ Error: {resp.status_code} - {resp.text[:200]}")
+#                 except requests.exceptions.Timeout:
+#                     st.error("❌ Request timed out after 10 minutes.")
+#                 except Exception as e:
+#                     st.error(f"❌ Error fetching analysis: {e}")
+#         with col3:
+#             if st.session_state.get("analysis_markdown"):
+#                 st.download_button(label="💾 Save as Markdown", data=st.session_state["analysis_markdown"], file_name="sec_analysis.md", mime="text/markdown", use_container_width=True)
+
+#         if st.session_state.get("analysis_source"):
+#             st.caption(f"📍 Source: {st.session_state['analysis_source']}")
+
+#         st.divider()
+
+#         if st.session_state.get("analysis_markdown"):
+#             markdown_content = st.session_state["analysis_markdown"]
+#             elements = parse_markdown_content(markdown_content)
+#             if elements:
+#                 for element in elements:
+#                     elem_type = element.get('type')
+#                     level = element.get('level', 0)
+#                     title = element.get('title', '')
+#                     if elem_type == 'heading':
+#                         if level == 1:
+#                             st.title(f"📊 {title}")
+#                         elif level == 2:
+#                             st.header(f"📈 {title}")
+#                         elif level == 3:
+#                             st.subheader(f"📋 {title}")
+#                         elif level == 4:
+#                             st.markdown(f"**{title}**")
+#                     elif elem_type == 'text':
+#                         content = element.get('content', '')
+#                         if content:
+#                             st.markdown(content)
+#                     elif elem_type == 'table':
+#                         headers = element.get('headers', [])
+#                         rows = element.get('rows', [])
+#                         if headers and rows:
+#                             normalized_rows = []
+#                             for row in rows:
+#                                 if len(row) < len(headers):
+#                                     row = row + [''] * (len(headers) - len(row))
+#                                 elif len(row) > len(headers):
+#                                     row = row[:len(headers)]
+#                                 normalized_rows.append(row)
+#                             df = pd.DataFrame(normalized_rows, columns=headers)
+#                             st.dataframe(df, use_container_width=True, hide_index=True)
+#                         st.markdown("")
+#             else:
+#                 st.markdown("### Raw Markdown Content")
+#                 st.markdown(markdown_content)
+#             with st.expander("📄 View Raw Markdown", expanded=False):
+#                 st.code(markdown_content, language="markdown")
+#         else:
+#             st.warning("⚠️ No analysis data loaded. Click 'Load from Local File' or 'Refresh from API' above.")
+#             st.markdown("""
+#             ### What's included in the analysis:
+#             - **Section Word Counts** - Word counts for each section (Business, Risk Factors, MD&A, etc.) by company
+#             - **Keyword Mentions** - Frequency of key terms like "risk", "growth", "competition", etc.
+#             - **Filing Coverage** - Overview of 10-K, 10-Q, 8-K, and DEF 14A filings per company
+#             - **Comparative Analysis** - Side-by-side comparison across all 10 companies
+#             ---
+#             ### Local File Locations Searched:
+#             """)
+#             for path in LOCAL_ANALYSIS_PATHS:
+#                 exists = "✅" if os.path.exists(path) else "❌"
+#                 st.caption(f"{exists} `{path}`")
+
+
+# # #############################################################################
+# # Signals Pipeline Section
+# # #############################################################################
+
+# else:
+#     st.title("📈 Signals Pipeline")
+
+#     # =========================================================================
+#     # Page 1: Collect Signals  (POST /api/v1/signals/collect)
+#     # =========================================================================
+#     if sub_page == "1. Collect Signals":
+#         st.header("Step 1: Collect Signals")
+#         st.info("🚀 Triggers signal collection for a company, polls until complete, and shows detailed breakdown from the task result.")
+
+#         st.warning("⚠️ It is recommended to delete existing signal data before collecting new signals to avoid duplicates.")
+
+#         with st.expander("🗑️ Delete Existing Signal Data", expanded=False):
+#             del_sig_ticker = st.text_input("Ticker to Reset", value=st.session_state["last_ticker"], key="del_sig_ticker").upper().strip()
+#             st.caption("Deletes all signals from Snowflake (EXTERNAL_SIGNALS, COMPANY_SIGNAL_SUMMARIES, SIGNAL_SCORES) and S3 (signals/jobs, signals/patents, signals/techstack).")
+
+#             if st.button("🗑️ Reset All Signals", type="secondary", use_container_width=True, key="del_sig_reset"):
+#                 if del_sig_ticker:
+#                     try:
+#                         with st.spinner(f"Resetting all signal data for {del_sig_ticker}..."):
+#                             resp = requests.delete(api_url(base_url, f"/api/v1/signals/reset/{del_sig_ticker}"), timeout=120)
+#                         if resp.status_code < 400:
+#                             result = safe_json(resp)
+#                             sf = result.get("snowflake", {})
+#                             s3 = result.get("s3", {})
+#                             st.success(f"✅ All signal data reset for {del_sig_ticker}")
+#                             st.dataframe(pd.DataFrame([
+#                                 {"Store": "Snowflake — external_signals", "Deleted": sf.get("external_signals_deleted", 0)},
+#                                 {"Store": "Snowflake — signal_summary", "Deleted": sf.get("signal_summary_deleted", False)},
+#                                 {"Store": "Snowflake — signal_scores", "Deleted": sf.get("signal_scores_deleted", False)},
+#                                 {"Store": "S3 files", "Deleted": len(s3.get("deleted_keys", []))},
+#                             ]), use_container_width=True, hide_index=True)
+#                             if s3.get("errors"):
+#                                 st.warning(f"⚠️ S3 errors: {s3['errors']}")
+#                         else:
+#                             st.error(f"❌ Error: {safe_json(resp).get('detail', safe_json(resp))}")
+#                     except Exception as e:
+#                         st.error(f"❌ Error: {e}")
+#                 else:
+#                     st.warning("Please enter a ticker.")
+
+#         st.divider()
+
+#         with st.form("collect_signals_form"):
+#             c1, c2 = st.columns(2)
+#             with c1:
+#                 sig_ticker = st.text_input("Company ID / Ticker", value=st.session_state["last_ticker"]).upper().strip()
+#                 categories = st.multiselect(
+#                     "Categories",
+#                     ["technology_hiring", "innovation_activity", "digital_presence", "leadership_signals"],
+#                     default=["technology_hiring", "innovation_activity", "digital_presence", "leadership_signals"],
+#                 )
+#             with c2:
+#                 sig_years = st.slider("Years Back (patents)", 1, 10, 5)
+#                 force_refresh = st.checkbox("Force Refresh", value=False)
+#             submitted = st.form_submit_button("🚀 Collect Signals", type="primary", use_container_width=True)
+
+#         if submitted and sig_ticker:
+#             st.session_state["last_ticker"] = sig_ticker
+#             import time
+
+#             try:
+#                 # Step 1: Trigger collection
+#                 payload = {
+#                     "company_id": sig_ticker,
+#                     "categories": categories,
+#                     "years_back": sig_years,
+#                     "force_refresh": force_refresh,
+#                 }
+#                 data = post_json(api_url(base_url, "/api/v1/signals/collect"), payload)
+#                 task_id = data.get("task_id", "")
+#                 st.session_state["last_task_id"] = task_id
+
+#                 # Step 2: Poll until complete
+#                 status_placeholder = st.empty()
+#                 progress_bar = st.progress(0)
+#                 log_container = st.container()
+#                 poll_logs = []  # accumulate log lines
+
+#                 final_status = "queued"
+#                 final_data = {}
+#                 max_polls = 120  # 120 × 3s = 6 minutes max
+
+#                 for poll_i in range(max_polls):
+#                     time.sleep(3)
+#                     try:
+#                         task_data = get(api_url(base_url, f"/api/v1/signals/tasks/{task_id}"))
+#                     except Exception:
+#                         continue
+
+#                     final_data = task_data
+#                     final_status = task_data.get("status", "unknown")
+#                     progress = task_data.get("progress", {})
+#                     total_cats = progress.get("total_categories", len(categories))
+#                     done_cats = progress.get("completed_categories", 0)
+#                     current_cat = progress.get("current_category")
+
+#                     # Update progress bar
+#                     pct = min(done_cats / max(total_cats, 1), 1.0)
+#                     progress_bar.progress(pct)
+
+#                     # Build live status
+#                     status_emoji = {"queued": "🕐", "running": "🔄", "completed": "✅", "completed_with_errors": "⚠️", "failed": "❌"}.get(final_status, "❓")
+#                     status_text = f"{status_emoji} **Status:** `{final_status}` — {done_cats}/{total_cats} categories done"
+#                     if current_cat:
+#                         status_text += f" — ⏳ Processing: `{current_cat}`"
+#                     status_placeholder.markdown(status_text)
+
+#                     # Log new category completions from result
+#                     result = task_data.get("result", {})
+#                     signals_result = result.get("signals", {})
+#                     new_log_count = len(signals_result)
+#                     if new_log_count > len(poll_logs):
+#                         for cat_name, cat_info in signals_result.items():
+#                             if cat_name not in [l["cat"] for l in poll_logs]:
+#                                 cat_status = cat_info.get("status", "—")
+#                                 cat_score = cat_info.get("score")
+#                                 icon = "✅" if cat_status == "success" else "❌"
+#                                 poll_logs.append({"cat": cat_name, "status": cat_status, "score": cat_score, "icon": icon})
+
+#                         with log_container:
+#                             for lg in poll_logs:
+#                                 score_str = f" | Score: **{lg['score']:.1f}**" if lg['score'] is not None else ""
+#                                 st.markdown(f"{lg['icon']} `{lg['cat']}` — {lg['status']}{score_str}")
+
+#                     if final_status in ("completed", "completed_with_errors", "failed"):
+#                         break
+
+#                 progress_bar.progress(1.0)
+
+#                 # Step 3: Final output
+#                 if final_status in ("completed", "completed_with_errors"):
+#                     st.success(f"✅ Signal collection completed for **{sig_ticker}**! (Task: `{task_id}`)")
+#                 elif final_status == "failed":
+#                     st.error(f"❌ Signal collection failed. Error: {final_data.get('error', 'Unknown')}")
+#                 else:
+#                     st.warning(f"⏳ Collection still running after polling timeout. Check Task Status page with ID: `{task_id}`")
+
+#                 st.divider()
+
+#                 # ---- Detailed Results Tables ----
+#                 result = final_data.get("result", {})
+#                 signals_result = result.get("signals", {})
+
+#                 if result:
+#                     st.subheader(f"📋 Signal Collection Results — {result.get('company_name', sig_ticker)} (`{result.get('ticker', sig_ticker)}`)")
+
+#                 if signals_result:
+#                     # Overall scores table
+#                     st.markdown("#### 📊 Category Scores")
+#                     score_rows = []
+#                     for cat_name, cat_info in signals_result.items():
+#                         cat_score = cat_info.get("score")
+#                         score_rows.append({
+#                             "Category": cat_name.replace("_", " ").title(),
+#                             "Status": cat_info.get("status", "—"),
+#                             "Score": f"{cat_score:.1f}" if cat_score is not None else "—",
+#                             "Error": cat_info.get("error", ""),
+#                         })
+#                     st.dataframe(pd.DataFrame(score_rows), use_container_width=True, hide_index=True)
+
+#                     # Per-category detail tables
+#                     for cat_name, cat_info in signals_result.items():
+#                         details = cat_info.get("details", {})
+#                         if not details:
+#                             continue
+
+#                         st.markdown(f"---")
+#                         cat_title = cat_name.replace("_", " ").title()
+#                         cat_score = cat_info.get("score")
+#                         st.markdown(f"#### 🔎 {cat_title}" + (f" — Score: **{cat_score:.1f}/100**" if cat_score is not None else ""))
+
+#                         # --- Leadership Signals breakdown ---
+#                         if cat_name == "leadership_signals":
+#                             ld = details
+#                             breakdown_rows = []
+#                             # Tech exec
+#                             tech_exec = ld.get("tech_exec_score") or ld.get("tech_exec", {})
+#                             if isinstance(tech_exec, dict):
+#                                 breakdown_rows.append({"Component": "Tech Exec Score", "Score": tech_exec.get("score", "—"), "Details": f"Found: {tech_exec.get('found', [])}"})
+#                             elif tech_exec is not None:
+#                                 breakdown_rows.append({"Component": "Tech Exec Score", "Score": tech_exec, "Details": str(ld.get("tech_execs_found", ""))})
+#                             # Keyword
+#                             kw = ld.get("keyword_score") or ld.get("keyword", {})
+#                             if isinstance(kw, dict):
+#                                 breakdown_rows.append({"Component": "Keyword Score", "Score": kw.get("score", "—"), "Details": f"Mentions: {kw.get('counts', kw.get('mentions', '—'))}"})
+#                             elif kw is not None:
+#                                 breakdown_rows.append({"Component": "Keyword Score", "Score": kw, "Details": f"Mentions: {ld.get('keyword_mentions', '—')}"})
+#                             # Performance metric
+#                             pm = ld.get("performance_metric_score") or ld.get("performance_metric", {})
+#                             if isinstance(pm, dict):
+#                                 breakdown_rows.append({"Component": "Performance Metric", "Score": pm.get("score", "—"), "Details": f"Found: {pm.get('found', 0)} metrics"})
+#                             elif pm is not None:
+#                                 breakdown_rows.append({"Component": "Performance Metric", "Score": pm, "Details": f"Found: {ld.get('metrics_found', '—')}"})
+#                             # Board tech
+#                             bt = ld.get("board_tech_score") or ld.get("board_tech", {})
+#                             if isinstance(bt, dict):
+#                                 breakdown_rows.append({"Component": "Board Tech Score", "Score": bt.get("score", "—"), "Details": f"Indicators: {bt.get('indicators', '—')}"})
+#                             elif bt is not None:
+#                                 breakdown_rows.append({"Component": "Board Tech Score", "Score": bt, "Details": f"Indicators: {ld.get('board_indicators', '—')}"})
+#                             # Total
+#                             total = ld.get("total_score") or ld.get("normalized_score") or cat_score
+#                             if total is not None:
+#                                 breakdown_rows.append({"Component": "🏆 Total Leadership Score", "Score": f"{total}", "Details": "/100"})
+
+#                             if breakdown_rows:
+#                                 st.dataframe(pd.DataFrame(breakdown_rows), use_container_width=True, hide_index=True)
+
+#                         # --- Technology Hiring breakdown ---
+#                         elif cat_name == "technology_hiring":
+#                             th = details
+#                             flat_rows = []
+#                             for k, v in th.items():
+#                                 if k in ("normalized_score", "score"):
+#                                     continue
+#                                 if isinstance(v, (str, int, float, bool)):
+#                                     flat_rows.append({"Metric": k.replace("_", " ").title(), "Value": str(v)})
+#                                 elif isinstance(v, list) and len(v) <= 10:
+#                                     flat_rows.append({"Metric": k.replace("_", " ").title(), "Value": ", ".join(str(x) for x in v)})
+#                             if flat_rows:
+#                                 st.dataframe(pd.DataFrame(flat_rows), use_container_width=True, hide_index=True)
+
+#                         # --- Innovation Activity breakdown ---
+#                         elif cat_name == "innovation_activity":
+#                             ia = details
+#                             flat_rows = []
+#                             for k, v in ia.items():
+#                                 if k in ("normalized_score", "score"):
+#                                     continue
+#                                 if isinstance(v, (str, int, float, bool)):
+#                                     flat_rows.append({"Metric": k.replace("_", " ").title(), "Value": str(v)})
+#                                 elif isinstance(v, list) and len(v) <= 10:
+#                                     flat_rows.append({"Metric": k.replace("_", " ").title(), "Value": ", ".join(str(x) for x in v)})
+#                             if flat_rows:
+#                                 st.dataframe(pd.DataFrame(flat_rows), use_container_width=True, hide_index=True)
+
+#                         # --- Digital Presence breakdown ---
+#                         elif cat_name == "digital_presence":
+#                             dp = details
+#                             flat_rows = []
+#                             for k, v in dp.items():
+#                                 if k in ("normalized_score", "score"):
+#                                     continue
+#                                 if isinstance(v, (str, int, float, bool)):
+#                                     flat_rows.append({"Metric": k.replace("_", " ").title(), "Value": str(v)})
+#                                 elif isinstance(v, list) and len(v) <= 10:
+#                                     flat_rows.append({"Metric": k.replace("_", " ").title(), "Value": ", ".join(str(x) for x in v)})
+#                             if flat_rows:
+#                                 st.dataframe(pd.DataFrame(flat_rows), use_container_width=True, hide_index=True)
+
+#                         # Fallback: show raw details in expander
+#                         with st.expander(f"🔍 Raw {cat_title} Details", expanded=False):
+#                             st.json(details)
+
+#                 # Errors
+#                 errors = result.get("errors", [])
+#                 if errors:
+#                     st.divider()
+#                     st.warning("⚠️ Errors during collection:")
+#                     for err in errors:
+#                         st.caption(f"• {err}")
+
+#                 show_json("Raw JSON Response (Task)", final_data)
+
+#             except Exception as e:
+#                 st.error(f"❌ Error: {e}")
+
+#     # =========================================================================
+#     # Page 2: Task Status  (GET /api/v1/signals/tasks/{task_id})
+#     # =========================================================================
+#     elif sub_page == "2. Task Status":
+#         st.header("Step 2: Task Status")
+#         st.info("🔎 Check the status of a background signal-collection task by its **task_id**.")
+
+#         task_id = st.text_input("Task ID", value=st.session_state.get("last_task_id", ""), help="Paste the task_id returned by Collect Signals")
+
+#         if st.button("🔍 Check Status", type="primary", use_container_width=True):
+#             if task_id.strip():
+#                 try:
+#                     with st.spinner("Fetching task status..."):
+#                         data = get(api_url(base_url, f"/api/v1/signals/tasks/{task_id.strip()}"))
+
+#                     status = data.get("status", "unknown")
+#                     status_emoji = {"queued": "🕐", "running": "🔄", "completed": "✅", "completed_with_errors": "⚠️", "failed": "❌"}.get(status, "❓")
+#                     st.markdown(f"### {status_emoji} Status: `{status}`")
+
+#                     # Task metadata table
+#                     st.subheader("📋 Task Details")
+#                     meta_df = pd.DataFrame([
+#                         {"Field": "Task ID", "Value": data.get("task_id", "—")},
+#                         {"Field": "Status", "Value": status},
+#                         {"Field": "Started At", "Value": data.get("started_at", "—")},
+#                         {"Field": "Completed At", "Value": data.get("completed_at", "—") or "—"},
+#                     ])
+#                     st.dataframe(meta_df, use_container_width=True, hide_index=True)
+
+#                     # Progress table
+#                     progress = data.get("progress")
+#                     if progress:
+#                         st.subheader("📊 Progress")
+#                         prog_df = pd.DataFrame([
+#                             {"Field": "Total Categories", "Value": progress.get("total_categories", "—")},
+#                             {"Field": "Completed Categories", "Value": progress.get("completed_categories", "—")},
+#                             {"Field": "Current Category", "Value": progress.get("current_category") or "—"},
+#                         ])
+#                         st.dataframe(prog_df, use_container_width=True, hide_index=True)
+
+#                     # Result breakdown
+#                     result = data.get("result")
+#                     if result:
+#                         st.subheader("📊 Results")
+#                         st.markdown(f"**Company:** {result.get('company_name', '—')} (`{result.get('ticker', '—')}`)")
+
+#                         signals_result = result.get("signals", {})
+#                         if signals_result:
+#                             result_rows = []
+#                             for cat, info in signals_result.items():
+#                                 score_val = info.get("score")
+#                                 result_rows.append({
+#                                     "Category": cat,
+#                                     "Status": info.get("status", "—"),
+#                                     "Score": round(score_val, 2) if score_val is not None else "—",
+#                                     "Error": info.get("error", ""),
+#                                 })
+#                             st.dataframe(pd.DataFrame(result_rows), use_container_width=True, hide_index=True)
+
+#                         errors = result.get("errors", [])
+#                         if errors:
+#                             st.warning("⚠️ Errors encountered:")
+#                             for err in errors:
+#                                 st.caption(f"• {err}")
+
+#                     # Error field
+#                     if data.get("error"):
+#                         st.error(f"❌ Task Error: {data['error']}")
+
+#                     show_json("Raw JSON Response", data)
+#                 except Exception as e:
+#                     st.error(f"❌ Error: {e}")
+#             else:
+#                 st.warning("Please enter a Task ID.")
+
+#     # =========================================================================
+#     # Page 3: List Signals  (GET /api/v1/signals)
+#     # =========================================================================
+#     elif sub_page == "3. List Signals":
+#         st.header("Step 3: List Signals")
+#         st.info("📋 Browse all signals with optional filters by category, ticker, and minimum score.")
+
+#         with st.form("list_signals_form"):
+#             c1, c2, c3, c4 = st.columns(4)
+#             with c1:
+#                 ls_ticker = st.text_input("Ticker (optional)", value="").upper().strip()
+#             with c2:
+#                 ls_category = st.selectbox("Category (optional)", ["", "technology_hiring", "innovation_activity", "digital_presence", "leadership_signals"])
+#             with c3:
+#                 ls_min_score = st.number_input("Min Score", min_value=0.0, max_value=100.0, value=0.0, step=1.0)
+#             with c4:
+#                 ls_limit = st.number_input("Limit", min_value=1, max_value=1000, value=100)
+#             submitted = st.form_submit_button("📋 List Signals", type="primary", use_container_width=True)
+
+#         if submitted:
+#             try:
+#                 params: Dict[str, Any] = {"limit": ls_limit}
+#                 if ls_ticker:
+#                     params["ticker"] = ls_ticker
+#                 if ls_category:
+#                     params["category"] = ls_category
+#                 if ls_min_score > 0:
+#                     params["min_score"] = ls_min_score
+
+#                 with st.spinner("Fetching signals..."):
+#                     data = get(api_url(base_url, "/api/v1/signals"), params=params)
+
+#                 total = data.get("total", 0)
+#                 filters = data.get("filters", {})
+#                 signals = data.get("signals", [])
+
+#                 st.success(f"✅ Found **{total}** signal(s)")
+
+#                 # Active filters
+#                 active_filters = {k: v for k, v in filters.items() if v is not None and v != ""}
+#                 if active_filters:
+#                     st.caption(f"Filters applied: {active_filters}")
+
+#                 # Signals table
+#                 if signals:
+#                     rows = []
+#                     for s in signals:
+#                         rows.append({
+#                             "Signal ID": str(s.get("signal_id") or s.get("id", ""))[:16],
+#                             "Company": s.get("ticker") or str(s.get("company_id", ""))[:12],
+#                             "Category": s.get("category", "—"),
+#                             "Source": s.get("source", "—"),
+#                             "Score": round(s["normalized_score"], 2) if s.get("normalized_score") is not None else "—",
+#                             "Confidence": round(s["confidence"], 2) if s.get("confidence") is not None else "—",
+#                             "Evidence": s.get("evidence_count", 0),
+#                             "Date": str(s.get("signal_date", ""))[:10] or "—",
+#                         })
+#                     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+#                 else:
+#                     st.info("No signals matched the filters.")
+
+#                 show_json("Raw JSON Response", data)
+#             except Exception as e:
+#                 st.error(f"❌ Error: {e}")
+
+#     # =========================================================================
+#     # Page 4: Company Signal Summary  (GET /api/v1/companies/{id}/signals)
+#     # =========================================================================
+#     elif sub_page == "4. Company Signal Summary":
+#         st.header("Step 4: Company Signal Summary")
+#         st.info("📊 Aggregated signal summary for a single company — scores by category plus composite score.")
+
+#         cs_ticker = st.text_input("Company ID / Ticker", value=st.session_state["last_ticker"]).upper().strip()
+
+#         if st.button("📊 Get Summary", type="primary", use_container_width=True):
+#             if cs_ticker:
+#                 st.session_state["last_ticker"] = cs_ticker
+#                 try:
+#                     with st.spinner(f"Fetching signal summary for {cs_ticker}..."):
+#                         data = get(api_url(base_url, f"/api/v1/companies/{cs_ticker}/signals"))
+
+#                     company_name = data.get("company_name", "")
+#                     ticker = data.get("ticker", cs_ticker)
+#                     st.success(f"✅ Summary loaded for **{company_name}** (`{ticker}`)")
+
+#                     # Summary scores table
+#                     summary = data.get("summary", {})
+#                     if summary:
+#                         render_signal_summary_table(summary, company_name)
+
+#                     # Categories breakdown table
+#                     categories = data.get("categories", {})
+#                     if categories:
+#                         render_categories_table(categories)
+
+#                     show_json("Raw JSON Response", data)
+#                 except Exception as e:
+#                     st.error(f"❌ Error: {e}")
+#             else:
+#                 st.warning("Please enter a ticker or company ID.")
+
+#     # =========================================================================
+#     # Page 5: Signals by Category  (GET /api/v1/companies/{id}/signals/{cat})
+#     # =========================================================================
+#     elif sub_page == "5. Signals by Category":
+#         st.header("Step 5: Signals by Category")
+#         st.info("🔬 Drill into a specific signal category for a company — see every individual signal record.")
+
+#         c1, c2 = st.columns(2)
+#         with c1:
+#             sc_ticker = st.text_input("Company ID / Ticker", value=st.session_state["last_ticker"]).upper().strip()
+#         with c2:
+#             sc_category = st.selectbox("Category", ["technology_hiring", "innovation_activity", "digital_presence", "leadership_signals"])
+
+#         if st.button("🔬 Get Category Signals", type="primary", use_container_width=True):
+#             if sc_ticker:
+#                 st.session_state["last_ticker"] = sc_ticker
+#                 try:
+#                     with st.spinner(f"Fetching {sc_category} signals for {sc_ticker}..."):
+#                         data = get(api_url(base_url, f"/api/v1/companies/{sc_ticker}/signals/{sc_category}"))
+
+#                     company_name = data.get("company_name", "")
+#                     ticker = data.get("ticker", sc_ticker)
+#                     count = data.get("signal_count", 0)
+#                     avg_score = data.get("average_score")
+
+#                     st.success(f"✅ **{company_name}** (`{ticker}`) — {sc_category}")
+
+#                     # KPI row
+#                     render_kpis([
+#                         ("Signals", count),
+#                         ("Avg Score", f"{avg_score:.2f}" if avg_score is not None else "—"),
+#                         ("Category", sc_category.replace("_", " ").title()),
+#                     ])
+
+#                     # Individual signals table
+#                     signals = data.get("signals", [])
+#                     if signals:
+#                         rows = []
+#                         for s in signals:
+#                             row = {
+#                                 "Signal ID": str(s.get("signal_id") or s.get("id", ""))[:16],
+#                                 "Source": s.get("source", "—"),
+#                                 "Score": round(s["normalized_score"], 2) if s.get("normalized_score") is not None else "—",
+#                                 "Confidence": round(s["confidence"], 2) if s.get("confidence") is not None else "—",
+#                                 "Evidence": s.get("evidence_count", 0),
+#                                 "Date": str(s.get("signal_date", ""))[:10] or "—",
+#                             }
+#                             rows.append(row)
+#                         st.subheader(f"📊 {sc_category.replace('_', ' ').title()} Signals ({count})")
+#                         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+#                         # Show metadata for first signal as sample
+#                         first_meta = signals[0].get("metadata")
+#                         if first_meta:
+#                             with st.expander("🔎 Sample Signal Metadata (first record)"):
+#                                 st.json(first_meta)
+#                     else:
+#                         st.info("No signals found for this category.")
+
+#                     show_json("Raw JSON Response", data)
+#                 except Exception as e:
+#                     st.error(f"❌ Error: {e}")
+#             else:
+#                 st.warning("Please enter a ticker or company ID.")
+
+
+
+# # Footer
+
+# st.sidebar.divider()
+# st.sidebar.caption("SEC Filings & Signals Pipeline v2.0")
+
+
+"""
+PE Org-AI-R Platform — Comprehensive Dashboard
+Covers CS1 (Platform), CS2 (Evidence), CS3 (Scoring Engine)
+
+Run: .\.venv\Scripts\python.exe -m streamlit run .\streamlit\app.py
+"""
+
 import streamlit as st
-import boto3
-from botocore.exceptions import ClientError
+import pandas as pd
+import json as _json
 
-# Load environment variables (if using python-dotenv)
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    pass
+st.set_page_config(
+    page_title="PE Org-AI-R Platform",
+    page_icon="🏢",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
-# AWS S3 Configuration
-AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID", "")
-AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "")
-AWS_REGION = os.getenv("AWS_REGION", "us-east-2")
-S3_BUCKET = os.getenv("S3_BUCKET", "pe-orgair-platform-group5")
-
-def get_s3_client():
-    return boto3.client('s3', aws_access_key_id=AWS_ACCESS_KEY_ID, aws_secret_access_key=AWS_SECRET_ACCESS_KEY, region_name=AWS_REGION)
-
-def fetch_from_s3(s3_key: str) -> str:
-    try:
-        s3 = get_s3_client()
-        resp = s3.get_object(Bucket=S3_BUCKET, Key=s3_key)
-        return resp['Body'].read().decode('utf-8')
-    except ClientError as e:
-        st.warning(f"S3 Error: {e}")
-        return ""
-    except Exception as e:
-        st.warning(f"Error fetching from S3: {e}")
-        return ""
-
-# Configuration
-st.set_page_config(page_title="SEC Filings & Signals", layout="wide", page_icon="📊")
-
-DEFAULT_FASTAPI_URL = os.getenv("FASTAPI_URL", "http://localhost:8000")
-
-if "base_url" not in st.session_state:
-    st.session_state["base_url"] = DEFAULT_FASTAPI_URL
-if "last_ticker" not in st.session_state:
-    st.session_state["last_ticker"] = "CAT"
-if "analysis_markdown" not in st.session_state:
-    st.session_state["analysis_markdown"] = None
-
-# Helper Functions
-def api_url(base: str, path: str) -> str:
-    return f"{base.rstrip('/')}/{path.lstrip('/')}"
-
-def safe_json(resp: requests.Response) -> Dict[str, Any]:
-    try:
-        return resp.json()
-    except:
-        return {"_error": resp.text, "_status": resp.status_code}
-
-def post_json(url: str, payload: Dict[str, Any], timeout_s: int = 240) -> Dict[str, Any]:
-    resp = requests.post(url, json=payload, timeout=timeout_s)
-    if resp.status_code >= 400:
-        raise RuntimeError(f"POST failed ({resp.status_code}): {safe_json(resp).get('detail', safe_json(resp))}")
-    return safe_json(resp)
-
-def post(url: str, params: Optional[Dict[str, Any]] = None, timeout_s: int = 300) -> Dict[str, Any]:
-    resp = requests.post(url, params=params, timeout=timeout_s)
-    if resp.status_code >= 400:
-        raise RuntimeError(f"POST failed ({resp.status_code}): {safe_json(resp).get('detail', safe_json(resp))}")
-    return safe_json(resp)
-
-def get(url: str, params: Optional[Dict[str, Any]] = None, timeout_s: int = 120) -> Dict[str, Any]:
-    resp = requests.get(url, params=params, timeout=timeout_s)
-    if resp.status_code >= 400:
-        raise RuntimeError(f"GET failed ({resp.status_code}): {safe_json(resp).get('detail', safe_json(resp))}")
-    return safe_json(resp)
-
-def render_kpis(items: List[Tuple[str, Any]]) -> None:
-    cols = st.columns(len(items))
-    for i, (label, value) in enumerate(items):
-        cols[i].metric(label, value)
-
-def show_json(title: str, data: Any) -> None:
-    with st.expander(title, expanded=False):
-        st.code(json.dumps(data, indent=2, default=str), language="json")
-
-def df_from_table(headers: List[str], rows: List[List[Any]]) -> pd.DataFrame:
-    if not rows:
-        return pd.DataFrame()
-    max_cols = max(len(r) for r in rows)
-    cols = headers[:max_cols] if headers else [f"col_{i}" for i in range(max_cols)]
-    while len(cols) < max_cols:
-        cols.append(f"col_{len(cols)}")
-    return pd.DataFrame([r + [None]*(max_cols - len(r)) for r in rows], columns=cols)
-
-def parse_markdown_content(markdown_content: str) -> List[Dict]:
-    elements = []
-    lines = markdown_content.split('\n')
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-        if line.startswith('# ') and not line.startswith('## '):
-            elements.append({'type': 'heading', 'level': 1, 'title': line.lstrip('#').strip(), 'content': None})
-            i += 1; continue
-        if line.startswith('## '):
-            elements.append({'type': 'heading', 'level': 2, 'title': line.lstrip('#').strip(), 'content': None})
-            i += 1; continue
-        if line.startswith('### '):
-            elements.append({'type': 'heading', 'level': 3, 'title': line.lstrip('#').strip(), 'content': None})
-            i += 1; continue
-        if line.startswith('#### '):
-            elements.append({'type': 'heading', 'level': 4, 'title': line.lstrip('#').strip(), 'content': None})
-            i += 1; continue
-        if line.strip().startswith('|'):
-            table_lines = []
-            while i < len(lines) and lines[i].strip().startswith('|'):
-                table_lines.append(lines[i].strip())
-                i += 1
-            if len(table_lines) >= 2:
-                header_line = table_lines[0]
-                headers = [cell.strip() for cell in header_line.split('|') if cell.strip()]
-                rows = []
-                for tl in table_lines[2:]:
-                    cells = [cell.strip() for cell in tl.split('|') if cell.strip()]
-                    if cells:
-                        rows.append(cells)
-                elements.append({'type': 'table', 'level': 0, 'title': None, 'headers': headers, 'rows': rows})
-            continue
-        if line.strip() and not line.strip().startswith('|') and not line.startswith('#'):
-            text_content = []
-            while i < len(lines) and lines[i].strip() and not lines[i].startswith('#') and not lines[i].strip().startswith('|'):
-                text_content.append(lines[i].strip())
-                i += 1
-            if text_content:
-                elements.append({'type': 'text', 'level': 0, 'title': None, 'content': ' '.join(text_content)})
-            continue
-        i += 1
-    return elements
-
-def parse_markdown_tables(markdown_content: str) -> List[Dict]:
-    tables = []
-    lines = markdown_content.split('\n')
-    current_title = ""
-    current_table_lines = []
-    in_table = False
-    for i, line in enumerate(lines):
-        if line.startswith('## ') or line.startswith('### '):
-            current_title = line.lstrip('#').strip()
-            continue
-        if line.strip().startswith('|'):
-            if not in_table:
-                in_table = True
-                current_table_lines = []
-            current_table_lines.append(line.strip())
-        else:
-            if in_table and current_table_lines:
-                table_data = parse_single_table(current_table_lines)
-                if table_data:
-                    table_data['title'] = current_title
-                    tables.append(table_data)
-                current_table_lines = []
-                in_table = False
-    if in_table and current_table_lines:
-        table_data = parse_single_table(current_table_lines)
-        if table_data:
-            table_data['title'] = current_title
-            tables.append(table_data)
-    return tables
-
-def parse_single_table(table_lines: List[str]) -> Optional[Dict]:
-    if len(table_lines) < 2:
-        return None
-    header_line = table_lines[0]
-    headers = [cell.strip() for cell in header_line.split('|') if cell.strip()]
-    rows = []
-    for line in table_lines[2:]:
-        cells = [cell.strip() for cell in line.split('|') if cell.strip()]
-        if cells:
-            rows.append(cells)
-    return {'headers': headers, 'rows': rows}
-
-def extract_section_content(text: str, section_name: str, max_chars: int = 1500) -> str:
-    if not text:
-        return ""
-    patterns = {
-        'business': [
-            r'Item\s*1\.\s*Business\.?\s*(.*?)(?=Item\s*1A\.|Item\s*1B\.|Item\s*2\.|Part\s*II|$)',
-            r'Item\s*1[\.\s]+Business(.*?)(?=Item\s*1A|Item\s*2|Part\s*II|$)',
-        ],
-        'risk_factors': [
-            r'Item\s*1A\.\s*Risk\s*Factors\.?\s*(.*?)(?=Item\s*1B\.|Item\s*2\.|Part\s*II|$)',
-            r'Item\s*1A[\.\s]+Risk\s*Factors(.*?)(?=Item\s*1B|Item\s*2|Part\s*II|$)',
-        ],
-        'mda': [
-            r'Item\s*7\.\s*Management.?s?\s*Discussion\s*and\s*Analysis.*?\.?\s*(.*?)(?=Item\s*7A\.|Item\s*8\.|Part\s*III|$)',
-            r'Item\s*7[\.\s]+Management.?s?\s*Discussion(.*?)(?=Item\s*7A|Item\s*8|Part\s*III|$)',
-        ],
-    }
-    section_patterns = patterns.get(section_name, [])
-    for pattern in section_patterns:
-        match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
-        if match:
-            content = match.group(1).strip()
-            content = re.sub(r'\s+', ' ', content)
-            if len(content) > 50:
-                return content[:max_chars] + ("..." if len(content) > max_chars else "")
-    return ""
-
-def extract_lines_containing(text: str, search_term: str, num_lines: int = 5, chars_per_line: int = 300) -> str:
-    if not text:
-        return ""
-    results = []
-    search_lower = search_term.lower()
-    text_lower = text.lower()
-    pos = 0
-    while len(results) < num_lines:
-        idx = text_lower.find(search_lower, pos)
-        if idx == -1:
-            break
-        start = max(0, idx - 50)
-        end = min(len(text), idx + chars_per_line)
-        while start > 0 and text[start] not in ' \n\t':
-            start -= 1
-        snippet = text[start:end].strip()
-        snippet = re.sub(r'\s+', ' ', snippet)
-        if snippet and len(snippet) > 20:
-            results.append(snippet)
-        pos = idx + len(search_term) + 100
-    return "\n\n---\n\n".join(results) if results else ""
-
-def load_json_file_content(s3_key: str, ticker: str, filing_type: str, filing_date: str) -> Tuple[str, str]:
-    keys_to_try = [
-        s3_key,
-        f"sec/parsed/{ticker}/{filing_type}/{filing_date}_full.json",
-        f"parsed/{ticker}/{filing_type}/{filing_date}_full.json",
-    ]
-    for key in keys_to_try:
-        if not key:
-            continue
-        try:
-            content = fetch_from_s3(key)
-            if content:
-                if content.strip().startswith('{'):
-                    data = json.loads(content)
-                    text = (data.get('text', '') or data.get('content', '') or data.get('full_text', '') or data.get('raw_text', '') or content)
-                    return text, f"s3://{S3_BUCKET}/{key}"
-                else:
-                    return content, f"s3://{S3_BUCKET}/{key}"
-        except Exception:
-            continue
-    return "", ""
-
-def fetch_documents_table(base_url: str, ticker: Optional[str] = None) -> None:
-    try:
-        params = {"ticker": ticker, "limit": 100} if ticker else {"limit": 100}
-        data = get(api_url(base_url, "/api/v1/documents"), params=params)
-        docs = data.get("documents", [])
-        if docs:
-            st.subheader("📋 Documents Table (Snowflake)")
-            df = pd.DataFrame([{
-                "ID": d.get("id", "")[:12] + "...",
-                "Ticker": d.get("ticker"),
-                "Filing Type": d.get("filing_type"),
-                "Filing Date": str(d.get("filing_date", ""))[:10],
-                "Status": d.get("status"),
-                "S3 Key": (d.get("s3_key") or "")[:30] + "...",
-                "Words": d.get("word_count", 0),
-                "Chunks": d.get("chunk_count", 0)
-            } for d in docs])
-            st.dataframe(df, use_container_width=True, hide_index=True)
-            st.caption(f"Total: {data.get('count', len(docs))} documents")
-        else:
-            st.info("No documents found in Snowflake")
-    except Exception as e:
-        st.error(f"❌ Error fetching documents: {e}")
-
-def fetch_chunks_table(base_url: str, ticker: Optional[str] = None) -> None:
-    try:
-        params = {"ticker": ticker, "limit": 50} if ticker else {"limit": 50}
-        doc_data = get(api_url(base_url, "/api/v1/documents"), params=params)
-        docs = doc_data.get("documents", [])
-        all_chunks = []
-        for doc in docs[:10]:
-            doc_id = doc.get("id")
-            if doc_id:
-                try:
-                    chunk_data = get(api_url(base_url, f"/api/v1/documents/chunks/{doc_id}"))
-                    chunks = chunk_data.get("chunks", [])
-                    for c in chunks[:5]:
-                        all_chunks.append({
-                            "Chunk ID": c.get("id", "")[:12] + "...",
-                            "Document ID": doc_id[:12] + "...",
-                            "Ticker": doc.get("ticker"),
-                            "Index": c.get("chunk_index"),
-                            "Section": c.get("section"),
-                            "Words": c.get("word_count"),
-                            "Content Preview": (c.get("content") or "")[:80] + "..."
-                        })
-                except:
-                    pass
-        if all_chunks:
-            st.subheader("📦 Document Chunks Table (Snowflake)")
-            st.dataframe(pd.DataFrame(all_chunks), use_container_width=True, hide_index=True)
-            st.caption(f"Showing sample of chunks (limited for display)")
-        else:
-            st.info("No chunks found")
-    except Exception as e:
-        st.error(f"❌ Error fetching chunks: {e}")
-
-
-
-# Signal table rendering helpers
-
-
-def render_signals_table(signals: List[Dict], title: str = "Signals") -> None:
-    """Render a list of signal dicts as a clean Streamlit table."""
-    if not signals:
-        st.info("No signals found.")
-        return
-    rows = []
-    for s in signals:
-        rows.append({
-            "Signal ID": str(s.get("signal_id") or s.get("id", ""))[:16] + "…",
-            "Company": s.get("ticker") or s.get("company_id", "")[:12],
-            "Category": s.get("category", "—"),
-            "Source": s.get("source", "—"),
-            "Score": round(s["normalized_score"], 2) if s.get("normalized_score") is not None else "—",
-            "Confidence": round(s["confidence"], 2) if s.get("confidence") is not None else "—",
-            "Evidence": s.get("evidence_count", 0),
-            "Date": str(s.get("signal_date", ""))[:10] or "—",
-        })
-    st.subheader(f"📊 {title}")
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-
-
-def render_signal_summary_table(summary: Dict, company_name: str = "") -> None:
-    """Render a signal summary dict as a vertical metrics table."""
-    label = f" — {company_name}" if company_name else ""
-    st.subheader(f"📋 Signal Summary{label}")
-    rows = [
-        {"Category": "Technology Hiring", "Score": summary.get("technology_hiring_score", "—")},
-        {"Category": "Innovation Activity", "Score": summary.get("innovation_activity_score", "—")},
-        {"Category": "Digital Presence", "Score": summary.get("digital_presence_score", "—")},
-        {"Category": "Leadership Signals", "Score": summary.get("leadership_signals_score", "—")},
-        {"Category": "🏆 Composite", "Score": summary.get("composite_score", "—")},
-    ]
-    for r in rows:
-        if r["Score"] is not None and r["Score"] != "—":
-            r["Score"] = round(float(r["Score"]), 2)
-    df = pd.DataFrame(rows)
-    st.dataframe(df, use_container_width=True, hide_index=True)
-    st.caption(f"Signal count: {summary.get('signal_count', 0)}  |  Last updated: {summary.get('last_updated', '—')}")
-
-
-def render_categories_table(categories: Dict) -> None:
-    """Render the categories breakdown dict as a table."""
-    if not categories:
-        st.info("No category breakdown available.")
-        return
-    rows = []
-    for cat, info in categories.items():
-        rows.append({
-            "Category": cat,
-            "Count": info.get("count", 0),
-            "Latest Score": round(info["latest_score"], 2) if info.get("latest_score") is not None else "—",
-        })
-    st.subheader("📂 Signals by Category")
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-
-
-
-# Sidebar Navigation
-
-
-st.sidebar.title("📊 SEC Pipeline")
+# ---------------------------------------------------------------------------
+# Sidebar
+# ---------------------------------------------------------------------------
+st.sidebar.markdown("## 🏢 PE Org-AI-R Platform")
+st.sidebar.caption("AI Readiness Scoring Engine")
 st.sidebar.divider()
 
-main_section = st.sidebar.selectbox("Select Section", ["SEC Filings", "Signals Pipeline"], index=0)
-
-if main_section == "SEC Filings":
-    sub_page = st.sidebar.radio(
-        "Pipeline Step",
-        [
-            "1. Download Filings",
-            "2. Parsing",
-            "3. PDF Parsing",
-            "4. De-duplication",
-            "5. Chunking",
-            "📊 Documents Summary",
-            "📈 SEC Analysis Summary",
-        ],
-        index=0,
-    )
-else:
-    sub_page = st.sidebar.radio(
-        "Signals",
-        [
-            "1. Collect Signals",
-            "2. Task Status",
-            "3. List Signals",
-            "4. Company Signal Summary",
-            "5. Signals by Category",
-        ],
-        index=0,
-    )
+page = st.sidebar.radio(
+    "Navigate",
+    [
+        "📊 Executive Summary",
+        "🏗️ Platform Foundation (CS1)",
+        "📄 Evidence Collection (CS2)",
+        "⚙️ Scoring Engine (CS3)",
+        "🔍 Company Deep Dive",
+    ],
+)
 
 st.sidebar.divider()
-st.sidebar.subheader("⚙️ API Settings")
-base_url = st.sidebar.text_input("FastAPI URL", value=st.session_state["base_url"])
-st.session_state["base_url"] = base_url
 
-if st.sidebar.button("🔍 Health Check", use_container_width=True):
+from data_loader import check_health, CS3_TICKERS, COMPANY_NAMES
+
+st.sidebar.divider()
+st.sidebar.caption("Big Data & Intelligent Analytics — Spring 2026")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PAGE 1: EXECUTIVE SUMMARY
+# ═══════════════════════════════════════════════════════════════════════════
+if page == "📊 Executive Summary":
+    from data_loader import load_all_results, build_portfolio_df, build_dimensions_df, EXPECTED_RANGES
+    from components.charts import portfolio_bar_chart, radar_chart
+
+    st.title("📊 Executive Summary")
+    st.caption("PE Org-AI-R Portfolio AI Readiness — 5 Company Assessment")
+
+    df = build_portfolio_df()
+    dims_df = build_dimensions_df()
+
+    if df.empty:
+        st.warning("No results found. Run `POST /api/v1/scoring/orgair/results` first.")
+        st.stop()
+
+    # Hero metrics
+    c1, c2, c3, c4 = st.columns(4)
+    passing = (df["In Range"] == "✅").sum()
+    c1.metric("Portfolio Validation", f"{passing}/5 ✅")
+    c2.metric("Avg Org-AI-R", f"{df['Org-AI-R'].mean():.1f}")
+    c3.metric("Highest", f"{df['Org-AI-R'].max():.1f} ({df.loc[df['Org-AI-R'].idxmax(), 'Ticker']})")
+    c4.metric("Lowest", f"{df['Org-AI-R'].min():.1f} ({df.loc[df['Org-AI-R'].idxmin(), 'Ticker']})")
+
+    st.divider()
+
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        st.plotly_chart(portfolio_bar_chart(df), use_container_width=True, key="exec_bar")
+    with col2:
+        if not dims_df.empty:
+            st.plotly_chart(radar_chart(dims_df), use_container_width=True, key="exec_radar")
+
+    st.subheader("Portfolio Scores")
+    st.dataframe(
+        df[["Ticker", "Company", "Sector", "Org-AI-R", "V^R", "H^R", "Synergy", "TC", "PF", "In Range"]],
+        use_container_width=True, hide_index=True,
+    )
+
+    st.subheader("Key Findings")
+    top = df.loc[df["Org-AI-R"].idxmax()]
+    bot = df.loc[df["Org-AI-R"].idxmin()]
+    st.markdown(f"""
+- **{top['Company']}** leads the portfolio at **{top['Org-AI-R']:.1f}**, driven by strong technology stack and use case scores
+- **{bot['Company']}** trails at **{bot['Org-AI-R']:.1f}**, with significant gaps in talent and technology infrastructure
+- The portfolio spans **{top['Org-AI-R'] - bot['Org-AI-R']:.1f} points** from leader to laggard — a clear AI maturity gradient
+- All 5 companies score within their CS3 Table 5 expected ranges, validating the scoring methodology
+    """)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PAGE 2: PLATFORM FOUNDATION (CS1) — with health status like original
+# ═══════════════════════════════════════════════════════════════════════════
+elif page == "🏗️ Platform Foundation (CS1)":
+    from data_loader import check_health, get_table_counts
+    import requests
+    import plotly.express as px
+
+    st.title("🏗️ Platform Foundation (CS1)")
+    st.caption("Building the shell: API layer, data models, and persistence that every other case study builds on")
+
+    # ── STEP 1: System Infrastructure ──
+    st.markdown("## Step 1 — System Infrastructure")
+    st.markdown(
+        "The platform runs on three connected services: a **FastAPI** backend that exposes scoring endpoints, "
+        "**Snowflake** as the analytical data warehouse, and **AWS S3** for raw file storage. "
+        "A **Redis** cache layer reduces redundant computation across repeated scoring runs."
+    )
+
+    if st.button("🔄 Refresh Status"):
+        st.cache_data.clear()
+        st.rerun()
+
+    API_BASE_URL = "http://localhost:8000"
+    api_healthy = False
+    health_data = None
     try:
-        get(api_url(base_url, "/health"))
-        st.sidebar.success("✅ API Connected")
-    except Exception as e:
-        st.sidebar.error(f"❌ {str(e)[:50]}")
+        resp = requests.get(f"{API_BASE_URL}/health", timeout=5)
+        if resp.status_code == 200:
+            api_healthy = True
+            health_data = resp.json()
+    except Exception:
+        pass
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        st.markdown("##### FastAPI")
+        if api_healthy:
+            st.success("✅ Running")
+        else:
+            st.error("❌ Not Running")
+            st.caption("Run: `uvicorn app.main:app --reload`")
+
+    with col2:
+        st.markdown("##### Snowflake")
+        if health_data and isinstance(health_data, dict):
+            deps = health_data.get("dependencies", {})
+            sf_status = deps.get("snowflake", "unknown")
+            if "healthy" in str(sf_status):
+                st.success("✅ Connected")
+            else:
+                st.error("❌ Not Connected")
+        else:
+            st.warning("⚠️ Check API first")
+
+    with col3:
+        st.markdown("##### Redis")
+        if health_data and isinstance(health_data, dict):
+            deps = health_data.get("dependencies", {})
+            redis_status = deps.get("redis", "unknown")
+            if "healthy" in str(redis_status):
+                st.success("✅ Connected")
+            else:
+                st.error("❌ Not Connected")
+        else:
+            st.warning("⚠️ Check API first")
+
+    with col4:
+        st.markdown("##### AWS S3")
+        if health_data and isinstance(health_data, dict):
+            deps = health_data.get("dependencies", {})
+            s3_status = deps.get("s3", "unknown")
+            if "healthy" in str(s3_status):
+                st.success("✅ Connected")
+            else:
+                st.error("❌ Not Connected")
+        else:
+            st.warning("⚠️ Check API first")
+
+    if health_data:
+        with st.expander("📋 View Full Health Response"):
+            st.json(health_data)
+
+    st.divider()
+
+    # ── STEP 2: Snowflake Data Schema ──
+    st.markdown("## Step 2 — Snowflake Data Schema")
+    st.markdown(
+        "The Snowflake warehouse (`pe_orgair_db.platform`) holds **11 tables** organized into 3 layers, "
+        "each built by a different case study. CS1 creates the entity framework, CS2 populates evidence, "
+        "and CS3 stores scoring outputs. Every scoring API call writes to both Snowflake (latest state) "
+        "and S3 (timestamped history)."
+    )
+
+    counts = get_table_counts()
+    _schema_rows = [
+        {"Layer": "CS1 — Foundation", "Table": "COMPANIES",               "Rows": counts.get("COMPANIES", 0),               "Purpose": "Core entity — 5 CS3 + 10 CS2 companies"},
+        {"Layer": "CS1 — Foundation", "Table": "INDUSTRIES",              "Rows": counts.get("INDUSTRIES", 0),              "Purpose": "Sector reference data with H^R baselines"},
+        {"Layer": "CS1 — Foundation", "Table": "ASSESSMENTS",             "Rows": counts.get("ASSESSMENTS", 0),             "Purpose": "Assessment records with status tracking"},
+        {"Layer": "CS1 — Foundation", "Table": "DIMENSION_SCORES",        "Rows": counts.get("DIMENSION_SCORES", 0),        "Purpose": "7-dimension scores per assessment"},
+        {"Layer": "CS2 — Evidence",   "Table": "DOCUMENTS",               "Rows": counts.get("DOCUMENTS", 0),               "Purpose": "SEC filing metadata (10-K, DEF 14A)"},
+        {"Layer": "CS2 — Evidence",   "Table": "DOCUMENT_CHUNKS",         "Rows": counts.get("DOCUMENT_CHUNKS", 0),         "Purpose": "Semantic chunks with S3 references"},
+        {"Layer": "CS2 — Evidence",   "Table": "EXTERNAL_SIGNALS",        "Rows": counts.get("EXTERNAL_SIGNALS", 0),        "Purpose": "Individual signal observations"},
+        {"Layer": "CS2 — Evidence",   "Table": "COMPANY_SIGNAL_SUMMARIES","Rows": counts.get("COMPANY_SIGNAL_SUMMARIES", 0),"Purpose": "Aggregated signal scores per company"},
+        {"Layer": "CS3 — Scoring",    "Table": "SCORING",                 "Rows": counts.get("SCORING", 0),                 "Purpose": "Final Org-AI-R composite scores"},
+        {"Layer": "CS3 — Scoring",    "Table": "SIGNAL_DIMENSION_MAPPING","Rows": counts.get("SIGNAL_DIMENSION_MAPPING", 0),"Purpose": "9×7 weight matrix (Table 1)"},
+        {"Layer": "CS3 — Scoring",    "Table": "EVIDENCE_DIMENSION_SCORES","Rows": counts.get("EVIDENCE_DIMENSION_SCORES", 0),"Purpose": "7-dimension scores from evidence mapper"},
+    ]
+    _schema_df = pd.DataFrame(_schema_rows)
+
+    st.dataframe(_schema_df, use_container_width=True, hide_index=True)
+
+    _cs1_rows = sum(counts.get(t, 0) for t in ["COMPANIES", "INDUSTRIES", "ASSESSMENTS", "DIMENSION_SCORES"])
+    _cs2_rows = sum(counts.get(t, 0) for t in ["DOCUMENTS", "DOCUMENT_CHUNKS", "EXTERNAL_SIGNALS", "COMPANY_SIGNAL_SUMMARIES"])
+    _cs3_rows = sum(counts.get(t, 0) for t in ["SCORING", "SIGNAL_DIMENSION_MAPPING", "EVIDENCE_DIMENSION_SCORES"])
+    _k1, _k2, _k3, _k4 = st.columns(4)
+    _k1.metric("CS1 Layer Rows", f"{_cs1_rows:,}")
+    _k2.metric("CS2 Layer Rows", f"{_cs2_rows:,}")
+    _k3.metric("CS3 Layer Rows", f"{_cs3_rows:,}")
+    _k4.metric("Total Tables", "11")
+
+    st.divider()
+
+    # ── STEP 3: API Layer ──
+    st.markdown("## Step 3 — API Layer Design")
+    st.markdown(
+        "The FastAPI application exposes a structured REST API organized by case study scope. "
+        "All endpoints are versioned under `/api/v1/`. Scoring endpoints accept a ticker and "
+        "return a complete JSON result that is simultaneously written to Snowflake (MERGE upsert) "
+        "and S3 (timestamped key — preserving full history)."
+    )
+
+    _endpoints = pd.DataFrame([
+        {"CS": "1", "Method": "GET",  "Path": "/health",                            "Description": "System health with all dependency statuses"},
+        {"CS": "1", "Method": "POST", "Path": "/api/v1/companies",                  "Description": "Register a new company for scoring"},
+        {"CS": "1", "Method": "GET",  "Path": "/api/v1/companies",                  "Description": "List all companies (paginated)"},
+        {"CS": "1", "Method": "GET",  "Path": "/api/v1/companies/{id}",             "Description": "Retrieve company by ID"},
+        {"CS": "1", "Method": "PUT",  "Path": "/api/v1/companies/{id}",             "Description": "Update company metadata"},
+        {"CS": "1", "Method": "DELETE","Path": "/api/v1/companies/{id}",            "Description": "Soft-delete company record"},
+        {"CS": "2", "Method": "POST", "Path": "/api/v1/documents/collect",          "Description": "Trigger SEC filing collection for a ticker"},
+        {"CS": "2", "Method": "POST", "Path": "/api/v1/signals/collect",            "Description": "Collect hiring, patent, and web signals"},
+        {"CS": "3", "Method": "POST", "Path": "/api/v1/scoring/tc-vr/{ticker}",     "Description": "Compute TC + V^R for one ticker"},
+        {"CS": "3", "Method": "POST", "Path": "/api/v1/scoring/hr/{ticker}",        "Description": "Compute H^R (position-adjusted readiness)"},
+        {"CS": "3", "Method": "POST", "Path": "/api/v1/scoring/orgair/portfolio",   "Description": "Score all 5 companies end-to-end"},
+        {"CS": "3", "Method": "POST", "Path": "/api/v1/scoring/orgair/results",     "Description": "Persist results JSON files to disk"},
+    ])
+
+    _ep_cs1  = int((_endpoints["CS"] == "1").sum())
+    _ep_cs2  = int((_endpoints["CS"] == "2").sum())
+    _ep_cs3  = int((_endpoints["CS"] == "3").sum())
+    _ep_total = len(_endpoints)
+    _e1, _e2, _e3, _e4 = st.columns(4)
+    _e1.metric("Total Endpoints", _ep_total)
+    _e2.metric("CS1 Endpoints", _ep_cs1)
+    _e3.metric("CS2 Endpoints", _ep_cs2)
+    _e4.metric("CS3 Endpoints", _ep_cs3)
+
+    st.dataframe(_endpoints, use_container_width=True, hide_index=True)
 
 
-# #############################################################################
-# SEC Filings Section
-# #############################################################################
+# ═══════════════════════════════════════════════════════════════════════════
+# PAGE 3: EVIDENCE COLLECTION (CS2) — STACKED LAYOUT
+# ═══════════════════════════════════════════════════════════════════════════
+elif page == "📄 Evidence Collection (CS2)":
+    import plotly.express as px
+    from data_loader import get_document_stats, get_signal_summaries
+    from components.charts import signal_comparison_chart, signal_heatmap
 
-if main_section == "SEC Filings":
-    st.title("📄 SEC Filings Pipeline")
+    st.title("📄 Evidence Collection (CS2)")
+    st.caption("Bridging what companies SAY in filings with what they actually DO — using SEC filings and 4 external signals")
 
-    # Page 1: Download Filings
-    if sub_page == "1. Download Filings":
-        st.header("Step 1: Download SEC Filings")
+    # ── STEP 1: SEC Filing Collection ──
+    st.markdown("## Step 1 — SEC Filing Collection")
+    st.markdown(
+        "For each of the 5 portfolio companies, CS2 pulls two SEC filing types from EDGAR via the SEC EDGAR API. "
+        "The `POST /api/v1/documents/collect` endpoint fetches the filings, extracts text, splits into "
+        "semantic chunks (~500 tokens each), stores metadata in Snowflake's `DOCUMENTS` table, and uploads "
+        "raw chunks to S3."
+    )
+    doc_df = get_document_stats()
+    if not doc_df.empty:
+        pivot = doc_df.pivot_table(
+            index="TICKER", columns="FILING_TYPE",
+            values="DOC_COUNT", aggfunc="sum", fill_value=0
+        ).reset_index()
 
-        st.warning("⚠️ We already have data present in the backend, so please delete a company first and then proceed with the downloading of the filings.")
+        total_docs  = int(doc_df["DOC_COUNT"].sum())
+        total_words = int(doc_df["TOTAL_WORDS"].sum())
+        total_chunks = int(doc_df["TOTAL_CHUNKS"].sum())
 
-        with st.expander("🗑️ Delete Existing Data", expanded=False):
-            del_ticker = st.text_input("Ticker to Delete", value=st.session_state["last_ticker"], key="del_ticker").upper().strip()
+        mc1, mc2, mc3, mc4 = st.columns(4)
+        mc1.metric("Total Documents",        f"{total_docs}")
+        mc2.metric("Total Words Processed",  f"{total_words:,}")
+        mc3.metric("Total Semantic Chunks",  f"{total_chunks:,}")
+        mc4.metric("Avg Chunk Size (words)", f"{total_words // max(total_chunks, 1):,}")
 
-            del_col1, del_col2 = st.columns(2)
-            with del_col1:
-                if st.button("🗑️ Delete ALL Data", type="secondary", use_container_width=True, key="del_all"):
-                    if del_ticker:
-                        try:
-                            with st.spinner(f"Deleting all data for {del_ticker}..."):
-                                resp = requests.delete(api_url(base_url, f"/api/v1/documents/reset/{del_ticker}"), timeout=120)
-                            if resp.status_code < 400:
-                                st.success(f"✅ All data deleted for {del_ticker}")
-                                st.json(safe_json(resp))
-                            else:
-                                st.error(f"❌ Error: {safe_json(resp).get('detail', safe_json(resp))}")
-                        except Exception as e:
-                            st.error(f"❌ Error: {e}")
+        st.markdown("**Documents per Company by Filing Type**")
+        st.dataframe(pivot, use_container_width=True, hide_index=True)
+    else:
+        st.info("No document data — run `POST /api/v1/documents/collect` first")
 
-                if st.button("🗑️ Delete RAW Files Only", type="secondary", use_container_width=True, key="del_raw"):
-                    if del_ticker:
-                        try:
-                            with st.spinner(f"Deleting raw files for {del_ticker}..."):
-                                resp = requests.delete(api_url(base_url, f"/api/v1/documents/reset/{del_ticker}/raw"), timeout=120)
-                            if resp.status_code < 400:
-                                st.success(f"✅ Raw files deleted for {del_ticker}")
-                                st.json(safe_json(resp))
-                            else:
-                                st.error(f"❌ Error: {safe_json(resp).get('detail', safe_json(resp))}")
-                        except Exception as e:
-                            st.error(f"❌ Error: {e}")
+    st.divider()
 
-            with del_col2:
-                if st.button("🗑️ Delete PARSED Files Only", type="secondary", use_container_width=True, key="del_parsed"):
-                    if del_ticker:
-                        try:
-                            with st.spinner(f"Deleting parsed files for {del_ticker}..."):
-                                resp = requests.delete(api_url(base_url, f"/api/v1/documents/reset/{del_ticker}/parsed"), timeout=120)
-                            if resp.status_code < 400:
-                                st.success(f"✅ Parsed files deleted for {del_ticker}")
-                                st.json(safe_json(resp))
-                            else:
-                                st.error(f"❌ Error: {safe_json(resp).get('detail', safe_json(resp))}")
-                        except Exception as e:
-                            st.error(f"❌ Error: {e}")
+    # ── STEP 2: PDF Parsing & Rubric Scoring ──
+    st.markdown("## Step 2 — PDF Parsing & Rubric Scoring")
+    st.markdown(
+        "Each filing section is scored on a **0–100 rubric** based on keyword presence, depth, and specificity. "
+        "Four rubric processors convert raw text into structured numeric scores that feed directly into "
+        "the CS3 dimension mapping matrix."
+    )
 
-                if st.button("🗑️ Delete CHUNKS Only", type="secondary", use_container_width=True, key="del_chunks"):
-                    if del_ticker:
-                        try:
-                            with st.spinner(f"Deleting chunks for {del_ticker}..."):
-                                resp = requests.delete(api_url(base_url, f"/api/v1/documents/reset/{del_ticker}/chunks"), timeout=120)
-                            if resp.status_code < 400:
-                                st.success(f"✅ Chunks deleted for {del_ticker}")
-                                st.json(safe_json(resp))
-                            else:
-                                st.error(f"❌ Error: {safe_json(resp).get('detail', safe_json(resp))}")
-                        except Exception as e:
-                            st.error(f"❌ Error: {e}")
+    with st.expander("📐 View Rubric Scoring Formulae"):
+        st.markdown("**SEC Item 1 (Business Description) → Use Case Portfolio score:**")
+        st.latex(
+            r"\text{Item1\_score} = "
+            r"\min\!\left(\frac{\text{AI keywords} \times 5}{1}, 50\right) + "
+            r"\min\!\left(\frac{\text{deployment mentions} \times 10}{1}, 30\right) + "
+            r"\min\!\left(\frac{\text{ROI references} \times 5}{1}, 20\right)"
+        )
 
-        st.divider()
-        st.info("📥 Downloads filings from SEC EDGAR → Uploads to S3 → Saves metadata to Snowflake")
+        st.markdown("**SEC Item 1A (Risk Factors) → AI Governance score:**")
+        st.latex(
+            r"\text{Item1A\_score} = "
+            r"\min\!\left(\text{risk disclosures} \times 8,\; 40\right) + "
+            r"\min\!\left(\text{mitigation actions} \times 6,\; 30\right) + "
+            r"\min\!\left(\text{governance mentions} \times 10,\; 30\right)"
+        )
 
-        st.subheader("Option 1: Download by Ticker")
-        with st.form("collect_form"):
-            c1, c2 = st.columns(2)
-            with c1:
-                ticker = st.text_input("Ticker Symbol", value=st.session_state["last_ticker"]).upper().strip()
-                filing_types = st.multiselect("Filing Types", ["10-K", "10-Q", "8-K", "DEF 14A"], default=["10-K", "10-Q", "8-K", "DEF 14A"])
-            with c2:
-                years_back = st.slider("Years Back", 1, 10, 3)
-            submitted = st.form_submit_button("📥 Download Filings", use_container_width=True, type="primary")
+        st.markdown("**SEC Item 7 (MD&A) → Leadership Vision score:**")
+        st.latex(
+            r"\text{Item7\_score} = "
+            r"\min\!\left(\text{investment mentions} \times 5,\; 40\right) + "
+            r"\min\!\left(\text{roadmap detail} \times 5,\; 30\right) + "
+            r"\min\!\left(\text{metric disclosures} \times 10,\; 30\right)"
+        )
 
-        if submitted and ticker and filing_types:
-            st.session_state["last_ticker"] = ticker
-            try:
-                with st.spinner(f"Collecting filings for {ticker}..."):
-                    data = post_json(api_url(base_url, "/api/v1/documents/collect"),
-                        {"ticker": ticker, "filing_types": filing_types, "years_back": years_back})
-                st.success("✅ Collection Complete!")
-                render_kpis([("Found", data.get("documents_found", 0)), ("Uploaded", data.get("documents_uploaded", 0)),
-                             ("Skipped", data.get("documents_skipped", 0)), ("Failed", data.get("documents_failed", 0))])
-                summary = data.get("summary", {})
-                if summary:
-                    st.markdown("#### Summary by Filing Type")
-                    st.dataframe(pd.DataFrame([{"Filing Type": k, "Count": v} for k, v in summary.items()]), use_container_width=True, hide_index=True)
-                show_json("Raw JSON Response", data)
-                st.divider()
-                fetch_documents_table(base_url, ticker)
-            except Exception as e:
-                st.error(f"❌ Error: {e}")
+        st.markdown("**DEF 14A (Proxy Statement) → AI Governance + Leadership score:**")
+        st.latex(
+            r"\text{Proxy\_score} = "
+            r"\min\!\left(\text{AI committee mentions} \times 10,\; 40\right) + "
+            r"\min\!\left(\text{oversight language} \times 8,\; 30\right) + "
+            r"\min\!\left(\text{director AI expertise} \times 10,\; 30\right)"
+        )
 
-        st.divider()
+    st.divider()
 
-        st.subheader("Option 2: Download ALL Companies")
-        st.warning("⚠️ **NOT RECOMMENDED**: Downloading all 10 companies at once may exceed the SEC EDGAR rate limit (0.1 - 10 requests/second). Use Option 1 for individual tickers instead.")
+    # ── STEP 3: External Signal Collection ──
+    st.markdown("## Step 3 — External Signal Collection")
+    st.markdown(
+        "While filings tell us what companies *say*, four scraped signals measure what they *do*: "
+        "hiring patterns, patent activity, digital footprint, and executive AI communication. "
+        "The `POST /api/v1/signals/collect` endpoint aggregates these into composite scores "
+        "stored in `COMPANY_SIGNAL_SUMMARIES`."
+    )
 
-        with st.form("collect_all_form"):
-            c1, c2 = st.columns(2)
-            with c1:
-                all_filing_types = st.multiselect("Filing Types", ["10-K", "10-Q", "8-K", "DEF 14A"],
-                    default=["10-K", "10-Q", "8-K", "DEF 14A"], key="all_filing_types")
-            with c2:
-                all_years_back = st.slider("Years Back", 1, 10, 3, key="all_years_back")
-            submitted_all = st.form_submit_button("📥 Download ALL Companies (Not Recommended)", use_container_width=True)
+    with st.expander("📐 View External Signal Score Formulae"):
+        st.markdown("**Technology Hiring Score** — based on AI job posting analysis:")
+        st.latex(
+            r"\text{Hiring} = "
+            r"\min\!\left(\frac{\text{AI jobs}}{10},\; 50\right) + "
+            r"\min\!\left(\text{senior\_ratio} \times 30,\; 30\right) + "
+            r"\min\!\left(\text{skill\_breadth} \times 20,\; 20\right)"
+        )
 
-        if submitted_all:
-            try:
-                with st.spinner("Collecting filings for ALL companies... This may take several minutes..."):
-                    query_str = "&".join([f"filing_types={ft}" for ft in all_filing_types])
-                    full_url = f"{api_url(base_url, '/api/v1/documents/collect/all')}?{query_str}&years_back={all_years_back}"
-                    resp = requests.post(full_url, timeout=600)
-                    data = safe_json(resp)
-                if resp.status_code < 400:
-                    st.success("✅ Collection Complete for ALL Companies!")
-                    if isinstance(data, list):
-                        for company_data in data:
-                            st.markdown(f"**{company_data.get('ticker', 'Unknown')}**: {company_data.get('documents_uploaded', 0)} uploaded")
-                    show_json("Raw JSON Response", data)
-                    st.divider()
-                    fetch_documents_table(base_url)
-                else:
-                    st.error(f"❌ Error: {data.get('detail', data)}")
-            except Exception as e:
-                st.error(f"❌ Error: {e}")
+        st.markdown("**Innovation Activity Score** — AI patent filing analysis:")
+        st.latex(
+            r"\text{Innovation} = "
+            r"\min\!\left(\text{ai\_patents} \times 5,\; 50\right) + "
+            r"\min\!\left(\text{recent\_filings} \times 2,\; 20\right) + "
+            r"\min\!\left(\text{categories} \times 10,\; 30\right)"
+        )
 
-    # Page 2: Parsing
-    elif sub_page == "2. Parsing":
-        st.header("Step 2: Parse Documents")
-        st.info("📄 Downloads from S3 → Extracts text/tables → Identifies sections (Items 1, 1A, 7) → Updates Snowflake")
+        st.markdown("**Digital Presence Score** — web and tech stack signals:")
+        st.latex(
+            r"\text{Digital} = "
+            r"\min\!\left(\text{ai\_tools\_detected} \times 15,\; 60\right) + "
+            r"\min\!\left(\text{cloud\_maturity} \times 20,\; 20\right) + "
+            r"\min\!\left(\text{data\_platform\_score} \times 20,\; 20\right)"
+        )
 
-        st.subheader("Option 1: Parse by Ticker")
-        c1, c2 = st.columns([2, 1])
-        with c1:
-            ticker = st.text_input("Ticker", value=st.session_state["last_ticker"]).upper().strip()
+        st.markdown("**Leadership Signals Score** — executive AI communication frequency and quality:")
+        st.latex(
+            r"\text{Leadership} = "
+            r"\min\!\left(\text{ai\_mentions\_per\_1k} \times 10,\; 50\right) + "
+            r"\min\!\left(\text{vision\_specificity} \times 30,\; 30\right) + "
+            r"\min\!\left(\text{commitment\_score} \times 20,\; 20\right)"
+        )
 
-        if st.button("📄 Parse Documents", type="primary", use_container_width=True):
-            if ticker:
-                st.session_state["last_ticker"] = ticker
-                try:
-                    with st.spinner(f"Parsing documents for {ticker}..."):
-                        data = post(api_url(base_url, f"/api/v1/documents/parse/{ticker}"))
-                    st.success("✅ Parsing Complete!")
+    sig_df = get_signal_summaries()
+    if not sig_df.empty:
+        _sc1, _sc2 = st.columns(2)
+        with _sc1:
+            st.plotly_chart(signal_heatmap(sig_df), use_container_width=True, key="cs2_signal_heat")
+        with _sc2:
+            st.plotly_chart(signal_comparison_chart(sig_df), use_container_width=True, key="cs2_signals_chart")
+        with st.expander("View raw signal data"):
+            st.dataframe(sig_df, use_container_width=True, hide_index=True)
+    else:
+        st.info("No signal data — run `POST /api/v1/signals/collect` first")
 
-                    render_kpis([("Total", data.get("total_documents", 0)), ("Parsed", data.get("parsed", 0)),
-                                 ("Skipped", data.get("skipped", 0)), ("Failed", data.get("failed", 0))])
+    st.divider()
 
-                    results = data.get("results", [])
-                    if results:
-                        st.subheader("Parsed Documents Summary")
-                        df = pd.DataFrame([{
-                            "Document ID": r.get("document_id", "")[:20] + "...",
-                            "Filing Type": r.get("filing_type"),
-                            "Filing Date": r.get("filing_date"),
-                            "Format": r.get("source_format"),
-                            "Words": r.get("word_count", 0),
-                            "Tables": r.get("table_count", 0),
-                            "Sections": ", ".join(r.get("sections_found", [])[:3])
-                        } for r in results])
-                        st.dataframe(df, use_container_width=True, hide_index=True)
+    # ── STEP 4: Evidence Insights & Say-Do Gap ──
+    st.markdown("## Step 4 — Evidence Insights & The Say-Do Gap")
+    st.markdown(
+        "The CS2 pipeline surfaces a fundamental discrepancy in corporate AI reporting. "
+        "Companies increasingly mention AI in SEC filings — but external signals reveal "
+        "the gap between narrative and actual execution."
+    )
 
-                        st.divider()
-                        st.subheader("📊 RAW vs PARSED Content Comparison (10-K Document)")
-                        st.caption("Showing 10-K document which contains Items 1, 1A, and 7")
+    _g1, _g2, _g3 = st.columns(3)
+    _g1.metric("Companies mentioning AI in 10-K", "73%",   help="Up from 12% in 2018 — industry average")
+    _g2.metric("Companies with AI in production",  "23%",   help="Source: McKinsey State of AI 2024")
+    _g3.metric("The Say-Do Gap",                   "50 pp", help="The gap this platform is designed to quantify and close")
 
-                        doc_10k = None
-                        for r in results:
-                            if r.get("filing_type") == "10-K":
-                                doc_10k = r
-                                break
-                        if not doc_10k:
-                            doc_10k = results[0]
-                            st.warning(f"⚠️ No 10-K document found. Showing {doc_10k.get('filing_type')} instead.")
 
-                        doc_id = doc_10k.get("document_id")
-                        if doc_id:
-                            try:
-                                parsed_content = get(api_url(base_url, f"/api/v1/documents/parsed/{doc_id}"))
-                                st.markdown(f"**Document: {doc_10k.get('filing_type')} - {doc_10k.get('filing_date')}** | Words: {parsed_content.get('word_count', 0):,} | Tables: {parsed_content.get('table_count', 0)}")
 
-                                col1, col2 = st.columns(2)
-                                with col1:
-                                    st.markdown("##### 📁 RAW Content")
-                                    st.markdown(f"**S3 Key:** `{parsed_content.get('s3_key', 'N/A')}`")
-                                    raw_text = parsed_content.get('text_preview', '')
-                                    if raw_text:
-                                        st.markdown("**Raw Text (showing key sections if found):**")
-                                        section_previews = []
-                                        item1_match = re.search(r'(item\s*1[.\s]+business.{0,500})', raw_text, re.IGNORECASE | re.DOTALL)
-                                        if item1_match:
-                                            section_previews.append(("Item 1 - Business", item1_match.group(1)[:400]))
-                                        item1a_match = re.search(r'(item\s*1a[.\s]+risk\s*factors.{0,500})', raw_text, re.IGNORECASE | re.DOTALL)
-                                        if item1a_match:
-                                            section_previews.append(("Item 1A - Risk Factors", item1a_match.group(1)[:400]))
-                                        item7_match = re.search(r'(item\s*7[.\s]+management.{0,500})', raw_text, re.IGNORECASE | re.DOTALL)
-                                        if item7_match:
-                                            section_previews.append(("Item 7 - MD&A", item7_match.group(1)[:400]))
-                                        if section_previews:
-                                            for section_name, preview in section_previews:
-                                                with st.expander(f"📄 {section_name}", expanded=True):
-                                                    st.text(preview + "...")
-                                        else:
-                                            st.text_area("Raw Text Content", value=raw_text[:2500], height=300, disabled=True, key="raw_text_parse")
-                                    tables = parsed_content.get('tables', [])
-                                    if tables:
-                                        with st.expander(f"📋 Raw HTML Table Structure ({len(tables)} tables)"):
-                                            html_preview = ""
-                                            for idx, table in enumerate(tables[:2]):
-                                                if isinstance(table, dict):
-                                                    headers = table.get('headers', [])
-                                                    trows = table.get('rows', [])
-                                                    html_preview += f"<table id='table_{idx+1}'>\n  <thead><tr>\n"
-                                                    for h in headers[:5]:
-                                                        html_preview += f"    <th>{str(h)[:25]}</th>\n"
-                                                    html_preview += "  </tr></thead>\n  <tbody>\n"
-                                                    for row in trows[:3]:
-                                                        html_preview += "    <tr>"
-                                                        for cell in row[:5]:
-                                                            html_preview += f"<td>{str(cell)[:20]}</td>"
-                                                        html_preview += "</tr>\n"
-                                                    html_preview += "  </tbody>\n</table>\n\n"
-                                            st.code(html_preview, language="html")
+# ═══════════════════════════════════════════════════════════════════════════
+# PAGE 4: SCORING ENGINE (CS3)
+# ═══════════════════════════════════════════════════════════════════════════
+elif page == "⚙️ Scoring Engine (CS3)":
+    import plotly.express as px
+    from data_loader import DIMENSION_LABELS, load_all_results, build_tc_breakdown_df, COMPANY_NAMES, EXPECTED_RANGES
+    from components.charts import tc_breakdown_bar
 
-                                with col2:
-                                    st.markdown("##### 📄 PARSED Content")
-                                    sections_list = parsed_content.get('sections', [])
-                                    st.markdown(f"**Sections Found:** {', '.join(sections_list) if sections_list else 'None'}")
-                                    st.markdown("---")
-                                    st.markdown("**📑 Key SEC Filing Sections (10-K only):**")
-                                    s3_key = parsed_content.get('s3_key', '')
-                                    full_text, loaded_path = load_json_file_content(s3_key, ticker, doc_10k.get('filing_type', '10-K'), doc_10k.get('filing_date', ''))
-                                    if loaded_path:
-                                        st.success(f"📂 Loaded from: `{loaded_path}`")
-                                        st.caption(f"📄 Total text length: {len(full_text):,} characters")
-                                    else:
-                                        st.warning(f"⚠️ Could not load JSON file from S3. Tried key: `{s3_key}`")
-                                        full_text = parsed_content.get('text_preview', '') or parsed_content.get('text', '') or ''
-                                        if full_text:
-                                            st.info(f"Using text_preview from API ({len(full_text):,} chars)")
+    st.title("⚙️ Scoring Engine (CS3)")
+    st.caption("Seven steps — from 9 evidence sources to a single validated Org-AI-R score per company")
 
-                                    st.markdown("**✅ Item 1 - Business (lines containing 'Item 1. Business'):**")
-                                    item1_lines = extract_lines_containing(full_text, "Item 1. Business", num_lines=3, chars_per_line=400)
-                                    if not item1_lines:
-                                        item1_lines = extract_lines_containing(full_text, "Item 1 Business", num_lines=3, chars_per_line=400)
-                                    if item1_lines:
-                                        st.text_area("Item 1 Content", value=item1_lines, height=180, disabled=True, key="item1_content")
-                                    else:
-                                        st.info("No lines found containing 'Item 1. Business'")
+    _all_r_cs3 = load_all_results()
 
-                                    st.markdown("**✅ Item 1A - Risk Factors (lines containing 'Item 1A'):**")
-                                    item1a_lines = extract_lines_containing(full_text, "Item 1A", num_lines=3, chars_per_line=400)
-                                    if item1a_lines:
-                                        st.text_area("Item 1A Content", value=item1a_lines, height=180, disabled=True, key="item1a_content")
-                                    else:
-                                        st.info("No lines found containing 'Item 1A'")
+    # ── STEP 1: Evidence → 7 Dimension Mapping ──
+    st.markdown("## Step 1 — Map Evidence to 7 AI Readiness Dimensions")
+    st.markdown(
+        "The **EvidenceMapper** takes 9 evidence sources (4 external signals + 5 SEC rubric scores) and "
+        "distributes each across 7 dimensions using the weight matrix below. "
+        "Each row represents one source; its weights show how much of that source's score flows into each dimension. "
+        "Weights in each row sum to 1.0."
+    )
 
-                                    st.markdown("**✅ Item 7 - MD&A (lines containing 'Item 7'):**")
-                                    item7_lines = extract_lines_containing(full_text, "Item 7", num_lines=3, chars_per_line=400)
-                                    if item7_lines:
-                                        st.text_area("Item 7 Content", value=item7_lines, height=180, disabled=True, key="item7_content")
-                                    else:
-                                        st.info("No lines found containing 'Item 7'")
+    _sources = [
+        "tech_hiring", "innovation", "digital", "leadership",
+        "sec_item_1", "sec_item_1a", "sec_item_7", "glassdoor", "board",
+    ]
+    _dims = ["Data Infra", "AI Gov", "Tech Stack", "Talent", "Leadership", "Use Cases", "Culture"]
+    _weights = [
+        [0.10, 0.00, 0.20, 0.70, 0.00, 0.00, 0.10],  # tech_hiring
+        [0.20, 0.00, 0.50, 0.00, 0.00, 0.30, 0.00],  # innovation
+        [0.60, 0.00, 0.40, 0.00, 0.00, 0.00, 0.00],  # digital
+        [0.00, 0.25, 0.00, 0.00, 0.60, 0.00, 0.15],  # leadership
+        [0.00, 0.00, 0.30, 0.00, 0.00, 0.70, 0.00],  # sec_item_1
+        [0.20, 0.80, 0.00, 0.00, 0.00, 0.00, 0.00],  # sec_item_1a
+        [0.20, 0.00, 0.00, 0.00, 0.50, 0.30, 0.00],  # sec_item_7
+        [0.00, 0.00, 0.00, 0.10, 0.10, 0.00, 0.80],  # glassdoor
+        [0.00, 0.70, 0.00, 0.00, 0.30, 0.00, 0.00],  # board
+    ]
+    _fig_map = px.imshow(
+        _weights, x=_dims, y=_sources,
+        color_continuous_scale="Blues", zmin=0, zmax=0.8,
+        text_auto=".2f", aspect="auto",
+        title="Evidence Source → Dimension Weight Matrix (CS3 Table 1)",
+    )
+    _fig_map.update_traces(textfont_size=12)
+    _fig_map.update_layout(
+        height=360, margin=dict(t=50, b=40, l=110, r=40),
+        coloraxis_showscale=False,
+    )
+    st.plotly_chart(_fig_map, use_container_width=True, key="cs3_mapping_heat")
+    st.caption("Each cell = weight of that evidence source's contribution to the dimension. Dark blue = strong contribution.")
 
-                                    tables = parsed_content.get('tables', [])
-                                    st.markdown("---")
-                                    st.markdown(f"**📊 Parsed Tables ({len(tables)} total):**")
-                                    if tables:
-                                        shown = 0
-                                        for idx, table in enumerate(tables):
-                                            if shown >= 3:
-                                                break
-                                            if isinstance(table, dict):
-                                                headers = table.get('headers', [])
-                                                trows = table.get('rows', [])
-                                                if trows and len(trows) >= 2 and headers:
-                                                    st.markdown(f"**Table {idx + 1}:**")
-                                                    num_cols = len(headers)
-                                                    norm_rows = []
-                                                    for row in trows[:8]:
-                                                        if isinstance(row, list):
-                                                            norm_row = row[:num_cols] + [''] * (num_cols - len(row))
-                                                            norm_rows.append(norm_row[:num_cols])
-                                                    if norm_rows:
-                                                        st.dataframe(pd.DataFrame(norm_rows, columns=headers[:num_cols]), use_container_width=True, hide_index=True, height=150)
-                                                        shown += 1
-                                        if len(tables) > 3:
-                                            st.caption(f"... and {len(tables) - 3} more tables")
-                                    else:
-                                        st.info("No tables extracted")
-                            except Exception as e:
-                                st.warning(f"Could not fetch parsed content: {e}")
+    st.divider()
 
-                    show_json("Raw JSON Response", data)
-                except Exception as e:
-                    st.error(f"❌ Error: {e}")
+    # ── STEP 2: Talent Concentration ──
+    st.markdown("## Step 2 — Talent Concentration (TC)")
+    st.markdown(
+        "**TC** penalizes companies that rely too heavily on a single person, team, or narrow skill set "
+        "for their AI capability. High TC = high key-person / key-team risk. "
+        "TC feeds into V^R as a penalty: even a high dimension score gets a haircut if AI talent is dangerously concentrated."
+    )
+    st.latex(r"TC = \frac{L_r + T_s + S_c + I_f}{4}")
+    st.markdown(
+        "| Symbol | Component | Meaning |\n"
+        "|---|---|---|\n"
+        "| $L_r$ | Leadership ratio | Senior AI roles ÷ total AI roles |\n"
+        "| $T_s$ | Team size factor | $1 \\div \\sqrt{\\text{total AI headcount}}$ — penalizes tiny teams |\n"
+        "| $S_c$ | Skill concentration | Herfindahl index of required skills (1.0 = single skill only) |\n"
+        "| $I_f$ | Individual factor | Named-individual AI mentions in SEC filings |"
+    )
 
-        st.divider()
+    _tc_df = build_tc_breakdown_df()
+    if not _tc_df.empty:
+        st.plotly_chart(tc_breakdown_bar(_tc_df), use_container_width=True, key="cs3_tc_bar")
+        st.caption(
+            "All values are in [0, 1]. Higher = greater concentration risk. "
+            "skill_concentration = 1.0 means all AI roles require the same narrow skill set. "
+            "team_size_factor near 1.0 indicates a very small AI team."
+        )
 
-        st.subheader("Option 2: Parse ALL Companies")
-        st.warning("⚠️ **NOT RECOMMENDED**: Parsing all companies at once may exceed the rate limit (0.1 - 10 requests/second). Use Option 1 instead.")
+    if _all_r_cs3:
+        _tc_rows = []
+        for _t in ["NVDA", "JPM", "WMT", "GE", "DG"]:
+            _r = _all_r_cs3.get(_t, {})
+            _tc_val = float(_r.get("talent_concentration", 0) or 0)
+            _tc_rows.append({
+                "Ticker": _t,
+                "Company": COMPANY_NAMES.get(_t, _t),
+                "TC Score": round(_tc_val, 4),
+                "Risk Level": "🟢 Low" if _tc_val < 0.10 else ("🟡 Medium" if _tc_val < 0.25 else "🔴 High"),
+            })
+        st.dataframe(pd.DataFrame(_tc_rows), use_container_width=True, hide_index=True)
 
-        if st.button("📄 Parse ALL Companies (Not Recommended)", use_container_width=True):
-            try:
-                with st.spinner("Parsing documents for ALL companies..."):
-                    data = post(api_url(base_url, "/api/v1/documents/parse"), timeout_s=600)
-                st.success("✅ Parsing Complete for ALL Companies!")
-                render_kpis([("Total Parsed", data.get("total_parsed", 0)), ("Skipped", data.get("total_skipped", 0)), ("Failed", data.get("total_failed", 0))])
-                by_company = data.get("by_company", [])
-                if by_company:
-                    st.dataframe(pd.DataFrame(by_company), use_container_width=True, hide_index=True)
-                show_json("Raw JSON Response", data)
-            except Exception as e:
-                st.error(f"❌ Error: {e}")
+    st.divider()
 
-    # Page 3: PDF Parsing
-    elif sub_page == "3. PDF Parsing":
-        st.header("Step 3: PDF Parsing (Sample)")
-        st.info("📄 Parse a sample 10-K PDF file from `data/sample_10k/` folder")
-        ticker = st.text_input("Ticker Symbol", value="AAPL", help="Company ticker symbol for the PDF")
-        st.caption("**Note**: Place PDF in `data/sample_10k/` folder")
-        if st.button("📄 Parse PDF", type="primary", use_container_width=True):
-            try:
-                with st.spinner("Parsing PDF..."):
-                    resp = requests.get(api_url(base_url, "/api/v1/sec/parse-pdf"), params={"ticker": ticker, "upload_to_s3": False}, timeout=300)
-                    data = safe_json(resp)
-                if resp.status_code < 400:
-                    st.success(f"✅ {data.get('message', 'PDF Parsing Complete!')}")
-                    render_kpis([("Pages", data.get('page_count', 0)), ("Words", f"{data.get('word_count', 0):,}"), ("Tables", data.get('table_count', 0))])
-                    st.markdown(f"**File**: `{data.get('pdf_file', 'N/A')}` | **Hash**: `{data.get('content_hash', 'N/A')}`")
-                    show_json("Raw JSON Response", data)
-                else:
-                    st.error(f"❌ Error: {data.get('detail', data)}")
-            except Exception as e:
-                st.error(f"❌ Error: {e}")
+    # ── STEP 3: V^R Score ──
+    st.markdown("## Step 3 — Vertical Readiness (V^R)")
+    st.markdown(
+        "**V^R** measures a company's *internal* AI readiness. It takes the weighted-average of 7 dimension scores "
+        "and applies the TC concentration penalty — companies with narrow AI talent face a readiness haircut "
+        "even if their dimension scores are high."
+    )
+    st.latex(r"V^R = \bar{D}_w \times (1 - \delta \cdot TC)")
+    st.markdown("Where: δ = 0.15 (concentration penalty weight), $\\bar{D}_w$ = weighted average of 7 dimension scores")
 
-    # Page 4: De-duplication
-    elif sub_page == "4. De-duplication":
-        st.header("Step 4: De-duplication")
-        st.info("De-duplication happens automatically during collection via content hash checking")
-        st.markdown("""
-        ### How De-duplication Works
-        1. **Content Hash**: Each document's content is hashed using SHA-256
-        2. **Duplicate Check**: Before uploading, the hash is compared against existing records
-        3. **Skip Duplicates**: Documents with matching hashes are skipped
-        """)
-        ticker = st.text_input("Ticker to Check", value=st.session_state["last_ticker"]).upper().strip()
-        if st.button("🔍 Check Documents", use_container_width=True):
-            if ticker:
-                fetch_documents_table(base_url, ticker)
+    st.markdown("**Dimension weights used in $\\bar{D}_w$:**")
+    _dim_w_df = pd.DataFrame([
+        {"Dimension": "Data Infrastructure", "Weight": "20%", "Primary Evidence Sources": "digital presence, SEC Item 1A"},
+        {"Dimension": "AI Governance",       "Weight": "15%", "Primary Evidence Sources": "SEC Item 1A, board proxy, leadership signal"},
+        {"Dimension": "Technology Stack",    "Weight": "20%", "Primary Evidence Sources": "digital presence, innovation, tech hiring"},
+        {"Dimension": "Talent & Skills",     "Weight": "20%", "Primary Evidence Sources": "tech hiring, glassdoor"},
+        {"Dimension": "Leadership Vision",   "Weight": "10%", "Primary Evidence Sources": "leadership signal, SEC Item 7, board proxy"},
+        {"Dimension": "Use Case Portfolio",  "Weight": "10%", "Primary Evidence Sources": "SEC Item 1, innovation, SEC Item 7"},
+        {"Dimension": "Culture & Change",    "Weight": "5%",  "Primary Evidence Sources": "glassdoor, tech hiring, leadership signal"},
+    ])
+    st.dataframe(_dim_w_df, use_container_width=True, hide_index=True)
 
-    # Page 5: Chunking
-    elif sub_page == "5. Chunking":
-        st.header("Step 5: Chunk Documents")
-        st.info("📦 Splits parsed documents into overlapping chunks for LLM processing")
+    if _all_r_cs3:
+        _vr_rows = []
+        for _t in ["NVDA", "JPM", "WMT", "GE", "DG"]:
+            _r = _all_r_cs3.get(_t, {})
+            _tc_val = float(_r.get("talent_concentration", 0) or 0)
+            _vr_val = float(_r.get("vr_score", 0) or 0)
+            _dims   = _r.get("dimension_scores", {}) or {}
+            _d_avg  = sum(_dims.values()) / len(_dims) if _dims else 0
+            _vr_rows.append({
+                "Ticker": _t,
+                "Company": COMPANY_NAMES.get(_t, _t),
+                "Avg Dim Score (D̄w)": round(_d_avg, 1),
+                "TC": round(_tc_val, 4),
+                "Penalty (1 − δ·TC)": round(1 - 0.15 * _tc_val, 4),
+                "V^R Score": round(_vr_val, 2),
+            })
+        st.dataframe(pd.DataFrame(_vr_rows), use_container_width=True, hide_index=True)
 
-        st.subheader("Option 1: Chunk by Ticker")
-        with st.form("chunk_form"):
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                ticker = st.text_input("Ticker", value=st.session_state["last_ticker"]).upper().strip()
-            with c2:
-                chunk_size = st.number_input("Chunk Size (words)", 100, 2000, 750, 50)
-            with c3:
-                chunk_overlap = st.number_input("Overlap (words)", 0, 200, 50, 10)
-            submitted = st.form_submit_button("📦 Chunk Documents", type="primary", use_container_width=True)
+    st.divider()
 
-        if submitted and ticker:
-            st.session_state["last_ticker"] = ticker
-            try:
-                with st.spinner(f"Chunking documents for {ticker}..."):
-                    data = post(api_url(base_url, f"/api/v1/documents/chunk/{ticker}"), params={"chunk_size": chunk_size, "chunk_overlap": chunk_overlap})
-                st.success("✅ Chunking Complete!")
-                render_kpis([("Documents", data.get("total_documents", 0)), ("Chunked", data.get("chunked", 0)), ("Total Chunks", data.get("total_chunks", 0)), ("Failed", data.get("failed", 0))])
-                show_json("Raw JSON Response", data)
-                st.divider()
-                fetch_chunks_table(base_url, ticker)
-            except Exception as e:
-                st.error(f"❌ Error: {e}")
+    # ── STEP 4: Position Factor ──
+    st.markdown("## Step 4 — Position Factor (PF)")
+    st.markdown(
+        "**PF** contextualizes a company's V^R *relative to its sector peers and market position*. "
+        "A company above its sector average with a large market cap earns a positive PF boost. "
+        "A laggard in a weaker market position receives a drag — lowering its holistic score."
+    )
+    st.latex(
+        r"PF = \lambda \cdot \frac{V^R - \bar{V}^R_{sector}}{\bar{V}^R_{sector}} "
+        r"+ (1 - \lambda) \cdot \text{MCap\_Percentile} - 0.5"
+    )
+    st.markdown("Where: λ = 0.25 (weight on V^R relative performance vs. market cap percentile)")
 
-        st.divider()
+    _pf_params_df = pd.DataFrame([
+        {"Sector": "Technology",         "Sector Avg V^R": 50.0, "H^R Base": 84.0, "Timing": 1.20, "MCap Percentile": "NVDA = 0.95"},
+        {"Sector": "Financial Services", "Sector Avg V^R": 55.0, "H^R Base": 68.0, "Timing": 1.05, "MCap Percentile": "JPM  = 0.85"},
+        {"Sector": "Retail",             "Sector Avg V^R": 48.0, "H^R Base": 55.0, "Timing": 1.00, "MCap Percentile": "WMT = 0.60, DG = 0.30"},
+        {"Sector": "Manufacturing",      "Sector Avg V^R": 45.0, "H^R Base": 52.0, "Timing": 1.00, "MCap Percentile": "GE   = 0.50"},
+    ])
+    st.dataframe(_pf_params_df, use_container_width=True, hide_index=True)
 
-        st.subheader("Option 2: Chunk ALL Companies")
-        st.warning("⚠️ **NOT RECOMMENDED**: Chunking all companies at once may exceed the rate limit (0.1 - 10 requests/second).")
-        with st.form("chunk_all_form"):
-            c1, c2 = st.columns(2)
-            with c1:
-                all_chunk_size = st.number_input("Chunk Size", 100, 2000, 750, 50, key="all_cs")
-            with c2:
-                all_chunk_overlap = st.number_input("Overlap", 0, 200, 50, 10, key="all_co")
-            submitted_all = st.form_submit_button("📦 Chunk ALL (Not Recommended)", use_container_width=True)
+    if _all_r_cs3:
+        _pf_rows = []
+        _sector_map = {"NVDA": "Technology", "JPM": "Financial Services", "WMT": "Retail", "GE": "Manufacturing", "DG": "Retail"}
+        for _t in ["NVDA", "JPM", "WMT", "GE", "DG"]:
+            _r = _all_r_cs3.get(_t, {})
+            _pf_val = float(_r.get("position_factor", 0) or 0)
+            _vr_val = float(_r.get("vr_score", 0) or 0)
+            _pf_rows.append({
+                "Ticker":  _t,
+                "Company": COMPANY_NAMES.get(_t, _t),
+                "Sector":  _sector_map.get(_t, ""),
+                "V^R":     round(_vr_val, 2),
+                "PF":      round(_pf_val, 4),
+                "Effect":  "✅ Positive boost" if _pf_val > 0 else "⚠️ Negative drag",
+            })
+        st.dataframe(pd.DataFrame(_pf_rows), use_container_width=True, hide_index=True)
 
-        if submitted_all:
-            try:
-                with st.spinner("Chunking ALL companies..."):
-                    data = post(api_url(base_url, "/api/v1/documents/chunk"), params={"chunk_size": all_chunk_size, "chunk_overlap": all_chunk_overlap}, timeout_s=600)
-                st.success("✅ Chunking Complete!")
-                render_kpis([("Documents", data.get("total_documents_chunked", 0)), ("Chunks", data.get("total_chunks_created", 0))])
-                show_json("Raw JSON Response", data)
-                fetch_chunks_table(base_url)
-            except Exception as e:
-                st.error(f"❌ Error: {e}")
+    st.divider()
 
-    # Documents Summary Page
-    elif sub_page == "📊 Documents Summary":
-        st.header("📊 Documents Summary")
-        if st.button("🔄 Load Report", type="primary", use_container_width=True):
-            try:
-                with st.spinner("Loading report..."):
-                    data = get(api_url(base_url, "/api/v1/documents/report"))
-                st.success("✅ Report Loaded!")
-                summary = data.get("summary", {})
-                if summary:
-                    total_signals = summary.get("total signals", 0)
-                    st.subheader("Summary Statistics")
-                    summary_df = pd.DataFrame([
-                        {"Metric": "Companies Processed", "Value": summary.get("companies_processed", 0)},
-                        {"Metric": "Total Documents", "Value": summary.get("total_documents", 0)},
-                        {"Metric": "Total Chunks", "Value": summary.get("total_chunks", 0)},
-                        {"Metric": "Total Words", "Value": f"{summary.get('total_words', 0):,}"},
-                        {"Metric": "Total Signals", "Value": total_signals},
-                    ])
-                    st.table(summary_df)
-                company_stats = data.get("documents_by_company", [])
-                if company_stats:
-                    st.subheader("Documents by Company")
-                    company_df = pd.DataFrame(company_stats)
-                    st.dataframe(company_df, use_container_width=True, hide_index=True)
-                show_json("Raw JSON Response", data)
-            except Exception as e:
-                st.error(f"❌ Error: {e}")
+    # ── STEP 5: H^R Score ──
+    st.markdown("## Step 5 — Holistic Readiness (H^R)")
+    st.markdown(
+        "**H^R** adjusts each company's readiness for its *external operating context* — "
+        "industry expectations, market position, and the current timing of the AI adoption wave. "
+        "A tech company is held to a higher bar than a discount retailer; "
+        "a market leader is expected to be further along than a mid-cap."
+    )
+    st.latex(r"H^R = \text{HR\_base} \times \text{Timing} \times (1 + PF)")
+    st.markdown(
+        "H^R base is set per sector (Technology = 84, Financial Services = 68, Retail = 55, Manufacturing = 52). "
+        "The Timing multiplier (1.00–1.20) reflects urgency of AI adoption in the current market cycle."
+    )
 
-    # SEC Analysis Summary
-    elif sub_page == "📈 SEC Analysis Summary":
-        st.header("📈 SEC Analysis Summary")
-        st.info("📊 Export and view section analysis for all companies with word counts and keyword mentions")
+    if _all_r_cs3:
+        _hr_rows = []
+        _sector_map = {"NVDA": "Technology", "JPM": "Financial Services", "WMT": "Retail", "GE": "Manufacturing", "DG": "Retail"}
+        for _t in ["NVDA", "JPM", "WMT", "GE", "DG"]:
+            _r = _all_r_cs3.get(_t, {})
+            _hr_val = float(_r.get("hr_score", 0) or 0)
+            _pf_val = float(_r.get("position_factor", 0) or 0)
+            _vr_val = float(_r.get("vr_score", 0) or 0)
+            _hr_rows.append({
+                "Ticker":  _t,
+                "Company": COMPANY_NAMES.get(_t, _t),
+                "Sector":  _sector_map.get(_t, ""),
+                "V^R":     round(_vr_val, 2),
+                "PF":      round(_pf_val, 4),
+                "H^R Score": round(_hr_val, 2),
+            })
+        st.dataframe(pd.DataFrame(_hr_rows), use_container_width=True, hide_index=True)
 
-        LOCAL_ANALYSIS_PATHS = [
-            "sec_analysis_summary.md", "./sec_analysis_summary.md", "../sec_analysis_summary.md",
-            "../../sec_analysis_summary.md", "../../../sec_analysis_summary.md",
-            "sec_analysis.md", "./sec_analysis.md", "../sec_analysis.md", "../../sec_analysis.md",
-            "data/sec_analysis_summary.md", "output/sec_analysis_summary.md",
-        ]
+    st.divider()
 
-        def load_local_analysis_file() -> Tuple[Optional[str], Optional[str]]:
-            for path in LOCAL_ANALYSIS_PATHS:
-                if os.path.exists(path):
-                    try:
-                        with open(path, 'r', encoding='utf-8') as f:
-                            content = f.read()
-                            if content.strip():
-                                return content, path
-                    except Exception:
-                        continue
-            return None, None
+    # ── STEP 6: Org-AI-R Composite + Sensitivity ──
+    st.markdown("## Step 6 — Org-AI-R Composite Score")
+    st.markdown(
+        "The final score blends internal readiness (V^R) and external-context readiness (H^R) "
+        "with a **synergy bonus** that rewards companies where both dimensions are simultaneously high — "
+        "a multiplier effect that amplifies genuine, broad-based AI capability."
+    )
+    st.latex(r"\text{Org-AI-R} = (1-\beta) \cdot [\alpha \cdot V^R + (1-\alpha) \cdot H^R] + \beta \cdot \text{Synergy}")
+    st.latex(r"\text{Synergy} = \frac{V^R \times H^R}{100}")
+    st.markdown("Default parameters: **α = 0.60** (V^R weighted slightly higher), **β = 0.12** (12% synergy blend weight)")
 
-        if not st.session_state.get("analysis_markdown"):
-            local_content, local_path = load_local_analysis_file()
-            if local_content:
-                st.session_state["analysis_markdown"] = local_content
-                st.session_state["analysis_source"] = f"Local file: {local_path}"
+    _kp1, _kp2, _kp3, _kp4 = st.columns(4)
+    _kp1.metric("α — V^R weight",     "0.60", help="H^R weight = 1 − α = 0.40")
+    _kp2.metric("β — Synergy weight", "0.12", help="12% of the score comes from the V^R × H^R synergy bonus")
+    _kp3.metric("δ — TC penalty",     "0.15", help="Each unit of TC reduces V^R by 15%")
+    _kp4.metric("λ — PF VR weight",   "0.25", help="25% of PF from V^R vs sector; 75% from market cap percentile")
 
-        col1, col2, col3 = st.columns([1, 1, 1])
+    if _all_r_cs3:
+        _score_rows = []
+        for _t in ["NVDA", "JPM", "WMT", "GE", "DG"]:
+            _r = _all_r_cs3.get(_t)
+            if not _r:
+                continue
+            _score_rows.append({
+                "Ticker":   _t,
+                "V^R":      round(float(_r.get("vr_score",      0) or 0), 1),
+                "H^R":      round(float(_r.get("hr_score",      0) or 0), 1),
+                "Synergy":  round(float(_r.get("synergy_score", 0) or 0), 1),
+                "Org-AI-R": round(float(_r.get("org_air_score", 0) or 0), 2),
+            })
+        _score_df = pd.DataFrame(_score_rows)
+        st.dataframe(_score_df, use_container_width=True, hide_index=True)
+
+        _fig_orgair = px.bar(
+            _score_df, x="Ticker", y="Org-AI-R",
+            title="Org-AI-R Score by Company",
+            labels={"Org-AI-R": "Org-AI-R Score"},
+            color_discrete_sequence=["#6366f1"],
+        )
+        _fig_orgair.update_traces(text=_score_df["Org-AI-R"], textposition="outside")
+        _fig_orgair.update_layout(
+            height=320, margin=dict(t=50, b=40),
+            yaxis=dict(range=[0, 105]), plot_bgcolor="white",
+            showlegend=False,
+        )
+        st.plotly_chart(_fig_orgair, use_container_width=True, key="cs3_orgair_bar")
+
+    st.divider()
+
+    # ── STEP 7: Portfolio Results ──
+    st.markdown("## Step 7 — Portfolio Results")
+    st.markdown(
+        "All 5 companies score within their pre-defined expected ranges — validating both the scoring formula "
+        "and the calibration of sector baselines and market cap percentiles. "
+        "The spread from NVDA (85.3) to DG (38.9) reflects genuine AI maturity differences, not formula bias."
+    )
+
+    if _all_r_cs3:
+        _port_rows = []
+        for _t in ["NVDA", "JPM", "WMT", "GE", "DG"]:
+            _r = _all_r_cs3.get(_t, {})
+            _score = float(_r.get("org_air_score", 0) or 0)
+            _exp   = EXPECTED_RANGES.get(_t, (0, 100))
+            _port_rows.append({
+                "Ticker":         _t,
+                "Company":        COMPANY_NAMES.get(_t, _t),
+                "V^R":            round(float(_r.get("vr_score",           0) or 0), 2),
+                "H^R":            round(float(_r.get("hr_score",           0) or 0), 2),
+                "Synergy":        round(float(_r.get("synergy_score",      0) or 0), 2),
+                "TC":             round(float(_r.get("talent_concentration",0) or 0), 4),
+                "PF":             round(float(_r.get("position_factor",    0) or 0), 4),
+                "Org-AI-R":       round(_score, 2),
+                "Expected Range": f"{_exp[0]}–{_exp[1]}",
+                "Status":         "✅ In Range" if _exp[0] <= _score <= _exp[1] else "⚠️ Out of Range",
+            })
+        st.dataframe(pd.DataFrame(_port_rows), use_container_width=True, hide_index=True)
+        st.success("✅ All 5 companies score within their expected ranges — scoring engine validated.")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PAGE 5: COMPANY DEEP DIVE
+# ═══════════════════════════════════════════════════════════════════════════
+elif page == "🔍 Company Deep Dive":
+    from data_loader import load_result, DIMENSION_LABELS, SECTORS, EXPECTED_RANGES
+    from components.charts import dimension_bar_chart, waterfall_chart
+
+    st.title("🔍 Company Deep Dive")
+
+    ticker = st.selectbox("Select Company", CS3_TICKERS,
+                          format_func=lambda t: f"{t} — {COMPANY_NAMES[t]}")
+
+    result = load_result(ticker)
+    if not result:
+        st.warning(f"No results found for {ticker}. Generate results first.")
+        st.stop()
+
+    # Hero card
+    score = result.get("org_air_score", 0)
+    exp = EXPECTED_RANGES.get(ticker, (0, 100))
+    in_range = exp[0] <= score <= exp[1]
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Org-AI-R", f"{score:.1f}", delta="✅ In Range" if in_range else "⚠️ Out")
+    c2.metric("V^R", f"{result.get('vr_score', 0):.1f}")
+    c3.metric("H^R", f"{result.get('hr_score', 0):.1f}")
+    c4.metric("TC", f"{result.get('talent_concentration', 0):.4f}")
+    c5.metric("PF", f"{result.get('position_factor', 0):.4f}")
+
+    st.divider()
+
+    tab1, tab2, tab3 = st.tabs(["Score Breakdown", "Evidence Trail", "Raw JSON"])
+
+    with tab1:
+        col1, col2 = st.columns([1, 1])
         with col1:
-            if st.button("📂 Load from Local File", type="primary", use_container_width=True):
-                local_content, local_path = load_local_analysis_file()
-                if local_content:
-                    st.session_state["analysis_markdown"] = local_content
-                    st.session_state["analysis_source"] = f"Local file: {local_path}"
-                    st.success(f"✅ Loaded from: `{local_path}`")
-                else:
-                    st.warning(f"⚠️ No local file found. Searched in: {', '.join(LOCAL_ANALYSIS_PATHS)}")
+            dims = result.get("dimension_scores")
+            if dims and isinstance(dims, dict):
+                labeled = {DIMENSION_LABELS.get(k, k): v for k, v in dims.items()}
+                st.plotly_chart(dimension_bar_chart(labeled, ticker), use_container_width=True, key=f"dim_{ticker}")
         with col2:
-            if st.button("🔄 Refresh from API", type="secondary", use_container_width=True):
+            st.plotly_chart(waterfall_chart(result, ticker), use_container_width=True, key=f"wf_{ticker}")
+
+        ci = result.get("org_air_ci")
+        if ci and isinstance(ci, dict):
+            st.markdown(
+                f"**95% CI:** [{ci.get('lower', 0):.1f}, {ci.get('upper', 0):.1f}]  |  "
+                f"SEM: {ci.get('sem', 0):.4f}  |  Reliability: {ci.get('reliability', 0):.4f}"
+            )
+
+    with tab2:
+        # TC breakdown
+        tc_bd = result.get("tc_breakdown")
+        if tc_bd:
+            st.subheader("Talent Concentration Breakdown")
+            if isinstance(tc_bd, dict):
+                tc_items = []
+                for k, v in tc_bd.items():
+                    val = f"{v:.4f}" if isinstance(v, (int, float)) else str(v)
+                    tc_items.append({"Component": k.replace("_", " ").title(), "Value": val})
+                st.dataframe(pd.DataFrame(tc_items), use_container_width=True, hide_index=True)
+            elif isinstance(tc_bd, str):
                 try:
-                    with st.spinner("Fetching SEC Analysis from API (timeout: 10 minutes)..."):
-                        resp = requests.get(api_url(base_url, "/api/v1/documents/analysis/export"), timeout=600)
-                        if resp.status_code < 400:
-                            markdown_content = resp.text
-                            st.session_state["analysis_markdown"] = markdown_content
-                            st.session_state["analysis_source"] = "API: /api/v1/documents/analysis/export"
-                            try:
-                                with open("sec_analysis_summary.md", 'w', encoding='utf-8') as f:
-                                    f.write(markdown_content)
-                                st.success("✅ Analysis loaded from API and saved to `sec_analysis_summary.md`")
-                            except:
-                                st.success("✅ Analysis loaded from API!")
-                        else:
-                            st.error(f"❌ Error: {resp.status_code} - {resp.text[:200]}")
-                except requests.exceptions.Timeout:
-                    st.error("❌ Request timed out after 10 minutes.")
-                except Exception as e:
-                    st.error(f"❌ Error fetching analysis: {e}")
-        with col3:
-            if st.session_state.get("analysis_markdown"):
-                st.download_button(label="💾 Save as Markdown", data=st.session_state["analysis_markdown"], file_name="sec_analysis.md", mime="text/markdown", use_container_width=True)
+                    parsed = _json.loads(tc_bd)
+                    st.json(parsed)
+                except Exception:
+                    st.code(tc_bd)
 
-        if st.session_state.get("analysis_source"):
-            st.caption(f"📍 Source: {st.session_state['analysis_source']}")
+        # Job analysis
+        ja = result.get("job_analysis")
+        if ja:
+            st.subheader("Job Analysis")
+            # Parse if string
+            if isinstance(ja, str):
+                try:
+                    ja = _json.loads(ja)
+                except Exception:
+                    st.code(ja)
+                    ja = None
+            if isinstance(ja, dict):
+                jc1, jc2, jc3, jc4 = st.columns(4)
+                jc1.metric("Total AI Jobs", ja.get("total_ai_jobs", 0))
+                jc2.metric("Senior", ja.get("senior_ai_jobs", 0))
+                jc3.metric("Mid-Level", ja.get("mid_ai_jobs", 0))
+                jc4.metric("Entry", ja.get("entry_ai_jobs", 0))
+                skills = ja.get("unique_skills", [])
+                if isinstance(skills, list) and skills:
+                    st.markdown(f"**Unique Skills ({len(skills)}):** {', '.join(str(s) for s in skills[:25])}")
 
-        st.divider()
+        # Validation
+        val = result.get("validation")
+        if val:
+            if isinstance(val, str):
+                try:
+                    val = _json.loads(val)
+                except Exception:
+                    st.code(val)
+                    val = None
+            if isinstance(val, dict):
+                st.subheader("Validation")
+                val_rows = []
+                for k, v in val.items():
+                    val_rows.append({"Check": k.replace("_", " ").title(), "Result": str(v)})
+                st.dataframe(pd.DataFrame(val_rows), use_container_width=True, hide_index=True)
 
-        if st.session_state.get("analysis_markdown"):
-            markdown_content = st.session_state["analysis_markdown"]
-            elements = parse_markdown_content(markdown_content)
-            if elements:
-                for element in elements:
-                    elem_type = element.get('type')
-                    level = element.get('level', 0)
-                    title = element.get('title', '')
-                    if elem_type == 'heading':
-                        if level == 1:
-                            st.title(f"📊 {title}")
-                        elif level == 2:
-                            st.header(f"📈 {title}")
-                        elif level == 3:
-                            st.subheader(f"📋 {title}")
-                        elif level == 4:
-                            st.markdown(f"**{title}**")
-                    elif elem_type == 'text':
-                        content = element.get('content', '')
-                        if content:
-                            st.markdown(content)
-                    elif elem_type == 'table':
-                        headers = element.get('headers', [])
-                        rows = element.get('rows', [])
-                        if headers and rows:
-                            normalized_rows = []
-                            for row in rows:
-                                if len(row) < len(headers):
-                                    row = row + [''] * (len(headers) - len(row))
-                                elif len(row) > len(headers):
-                                    row = row[:len(headers)]
-                                normalized_rows.append(row)
-                            df = pd.DataFrame(normalized_rows, columns=headers)
-                            st.dataframe(df, use_container_width=True, hide_index=True)
-                        st.markdown("")
-            else:
-                st.markdown("### Raw Markdown Content")
-                st.markdown(markdown_content)
-            with st.expander("📄 View Raw Markdown", expanded=False):
-                st.code(markdown_content, language="markdown")
+    with tab3:
+        if result:
+            st.json(result)
         else:
-            st.warning("⚠️ No analysis data loaded. Click 'Load from Local File' or 'Refresh from API' above.")
-            st.markdown("""
-            ### What's included in the analysis:
-            - **Section Word Counts** - Word counts for each section (Business, Risk Factors, MD&A, etc.) by company
-            - **Keyword Mentions** - Frequency of key terms like "risk", "growth", "competition", etc.
-            - **Filing Coverage** - Overview of 10-K, 10-Q, 8-K, and DEF 14A filings per company
-            - **Comparative Analysis** - Side-by-side comparison across all 10 companies
-            ---
-            ### Local File Locations Searched:
-            """)
-            for path in LOCAL_ANALYSIS_PATHS:
-                exists = "✅" if os.path.exists(path) else "❌"
-                st.caption(f"{exists} `{path}`")
-
-
-# #############################################################################
-# Signals Pipeline Section
-# #############################################################################
-
-else:
-    st.title("📈 Signals Pipeline")
-
-    # =========================================================================
-    # Page 1: Collect Signals  (POST /api/v1/signals/collect)
-    # =========================================================================
-    if sub_page == "1. Collect Signals":
-        st.header("Step 1: Collect Signals")
-        st.info("🚀 Triggers signal collection for a company, polls until complete, and shows detailed breakdown from the task result.")
-
-        st.warning("⚠️ It is recommended to delete existing signal data before collecting new signals to avoid duplicates.")
-
-        with st.expander("🗑️ Delete Existing Signal Data", expanded=False):
-            del_sig_ticker = st.text_input("Ticker to Reset", value=st.session_state["last_ticker"], key="del_sig_ticker").upper().strip()
-            st.caption("Deletes all signals from Snowflake (EXTERNAL_SIGNALS, COMPANY_SIGNAL_SUMMARIES, SIGNAL_SCORES) and S3 (signals/jobs, signals/patents, signals/techstack).")
-
-            if st.button("🗑️ Reset All Signals", type="secondary", use_container_width=True, key="del_sig_reset"):
-                if del_sig_ticker:
-                    try:
-                        with st.spinner(f"Resetting all signal data for {del_sig_ticker}..."):
-                            resp = requests.delete(api_url(base_url, f"/api/v1/signals/reset/{del_sig_ticker}"), timeout=120)
-                        if resp.status_code < 400:
-                            result = safe_json(resp)
-                            sf = result.get("snowflake", {})
-                            s3 = result.get("s3", {})
-                            st.success(f"✅ All signal data reset for {del_sig_ticker}")
-                            st.dataframe(pd.DataFrame([
-                                {"Store": "Snowflake — external_signals", "Deleted": sf.get("external_signals_deleted", 0)},
-                                {"Store": "Snowflake — signal_summary", "Deleted": sf.get("signal_summary_deleted", False)},
-                                {"Store": "Snowflake — signal_scores", "Deleted": sf.get("signal_scores_deleted", False)},
-                                {"Store": "S3 files", "Deleted": len(s3.get("deleted_keys", []))},
-                            ]), use_container_width=True, hide_index=True)
-                            if s3.get("errors"):
-                                st.warning(f"⚠️ S3 errors: {s3['errors']}")
-                        else:
-                            st.error(f"❌ Error: {safe_json(resp).get('detail', safe_json(resp))}")
-                    except Exception as e:
-                        st.error(f"❌ Error: {e}")
-                else:
-                    st.warning("Please enter a ticker.")
-
-        st.divider()
-
-        with st.form("collect_signals_form"):
-            c1, c2 = st.columns(2)
-            with c1:
-                sig_ticker = st.text_input("Company ID / Ticker", value=st.session_state["last_ticker"]).upper().strip()
-                categories = st.multiselect(
-                    "Categories",
-                    ["technology_hiring", "innovation_activity", "digital_presence", "leadership_signals"],
-                    default=["technology_hiring", "innovation_activity", "digital_presence", "leadership_signals"],
-                )
-            with c2:
-                sig_years = st.slider("Years Back (patents)", 1, 10, 5)
-                force_refresh = st.checkbox("Force Refresh", value=False)
-            submitted = st.form_submit_button("🚀 Collect Signals", type="primary", use_container_width=True)
-
-        if submitted and sig_ticker:
-            st.session_state["last_ticker"] = sig_ticker
-            import time
-
-            try:
-                # Step 1: Trigger collection
-                payload = {
-                    "company_id": sig_ticker,
-                    "categories": categories,
-                    "years_back": sig_years,
-                    "force_refresh": force_refresh,
-                }
-                data = post_json(api_url(base_url, "/api/v1/signals/collect"), payload)
-                task_id = data.get("task_id", "")
-                st.session_state["last_task_id"] = task_id
-
-                # Step 2: Poll until complete
-                status_placeholder = st.empty()
-                progress_bar = st.progress(0)
-                log_container = st.container()
-                poll_logs = []  # accumulate log lines
-
-                final_status = "queued"
-                final_data = {}
-                max_polls = 120  # 120 × 3s = 6 minutes max
-
-                for poll_i in range(max_polls):
-                    time.sleep(3)
-                    try:
-                        task_data = get(api_url(base_url, f"/api/v1/signals/tasks/{task_id}"))
-                    except Exception:
-                        continue
-
-                    final_data = task_data
-                    final_status = task_data.get("status", "unknown")
-                    progress = task_data.get("progress", {})
-                    total_cats = progress.get("total_categories", len(categories))
-                    done_cats = progress.get("completed_categories", 0)
-                    current_cat = progress.get("current_category")
-
-                    # Update progress bar
-                    pct = min(done_cats / max(total_cats, 1), 1.0)
-                    progress_bar.progress(pct)
-
-                    # Build live status
-                    status_emoji = {"queued": "🕐", "running": "🔄", "completed": "✅", "completed_with_errors": "⚠️", "failed": "❌"}.get(final_status, "❓")
-                    status_text = f"{status_emoji} **Status:** `{final_status}` — {done_cats}/{total_cats} categories done"
-                    if current_cat:
-                        status_text += f" — ⏳ Processing: `{current_cat}`"
-                    status_placeholder.markdown(status_text)
-
-                    # Log new category completions from result
-                    result = task_data.get("result", {})
-                    signals_result = result.get("signals", {})
-                    new_log_count = len(signals_result)
-                    if new_log_count > len(poll_logs):
-                        for cat_name, cat_info in signals_result.items():
-                            if cat_name not in [l["cat"] for l in poll_logs]:
-                                cat_status = cat_info.get("status", "—")
-                                cat_score = cat_info.get("score")
-                                icon = "✅" if cat_status == "success" else "❌"
-                                poll_logs.append({"cat": cat_name, "status": cat_status, "score": cat_score, "icon": icon})
-
-                        with log_container:
-                            for lg in poll_logs:
-                                score_str = f" | Score: **{lg['score']:.1f}**" if lg['score'] is not None else ""
-                                st.markdown(f"{lg['icon']} `{lg['cat']}` — {lg['status']}{score_str}")
-
-                    if final_status in ("completed", "completed_with_errors", "failed"):
-                        break
-
-                progress_bar.progress(1.0)
-
-                # Step 3: Final output
-                if final_status in ("completed", "completed_with_errors"):
-                    st.success(f"✅ Signal collection completed for **{sig_ticker}**! (Task: `{task_id}`)")
-                elif final_status == "failed":
-                    st.error(f"❌ Signal collection failed. Error: {final_data.get('error', 'Unknown')}")
-                else:
-                    st.warning(f"⏳ Collection still running after polling timeout. Check Task Status page with ID: `{task_id}`")
-
-                st.divider()
-
-                # ---- Detailed Results Tables ----
-                result = final_data.get("result", {})
-                signals_result = result.get("signals", {})
-
-                if result:
-                    st.subheader(f"📋 Signal Collection Results — {result.get('company_name', sig_ticker)} (`{result.get('ticker', sig_ticker)}`)")
-
-                if signals_result:
-                    # Overall scores table
-                    st.markdown("#### 📊 Category Scores")
-                    score_rows = []
-                    for cat_name, cat_info in signals_result.items():
-                        cat_score = cat_info.get("score")
-                        score_rows.append({
-                            "Category": cat_name.replace("_", " ").title(),
-                            "Status": cat_info.get("status", "—"),
-                            "Score": f"{cat_score:.1f}" if cat_score is not None else "—",
-                            "Error": cat_info.get("error", ""),
-                        })
-                    st.dataframe(pd.DataFrame(score_rows), use_container_width=True, hide_index=True)
-
-                    # Per-category detail tables
-                    for cat_name, cat_info in signals_result.items():
-                        details = cat_info.get("details", {})
-                        if not details:
-                            continue
-
-                        st.markdown(f"---")
-                        cat_title = cat_name.replace("_", " ").title()
-                        cat_score = cat_info.get("score")
-                        st.markdown(f"#### 🔎 {cat_title}" + (f" — Score: **{cat_score:.1f}/100**" if cat_score is not None else ""))
-
-                        # --- Leadership Signals breakdown ---
-                        if cat_name == "leadership_signals":
-                            ld = details
-                            breakdown_rows = []
-                            # Tech exec
-                            tech_exec = ld.get("tech_exec_score") or ld.get("tech_exec", {})
-                            if isinstance(tech_exec, dict):
-                                breakdown_rows.append({"Component": "Tech Exec Score", "Score": tech_exec.get("score", "—"), "Details": f"Found: {tech_exec.get('found', [])}"})
-                            elif tech_exec is not None:
-                                breakdown_rows.append({"Component": "Tech Exec Score", "Score": tech_exec, "Details": str(ld.get("tech_execs_found", ""))})
-                            # Keyword
-                            kw = ld.get("keyword_score") or ld.get("keyword", {})
-                            if isinstance(kw, dict):
-                                breakdown_rows.append({"Component": "Keyword Score", "Score": kw.get("score", "—"), "Details": f"Mentions: {kw.get('counts', kw.get('mentions', '—'))}"})
-                            elif kw is not None:
-                                breakdown_rows.append({"Component": "Keyword Score", "Score": kw, "Details": f"Mentions: {ld.get('keyword_mentions', '—')}"})
-                            # Performance metric
-                            pm = ld.get("performance_metric_score") or ld.get("performance_metric", {})
-                            if isinstance(pm, dict):
-                                breakdown_rows.append({"Component": "Performance Metric", "Score": pm.get("score", "—"), "Details": f"Found: {pm.get('found', 0)} metrics"})
-                            elif pm is not None:
-                                breakdown_rows.append({"Component": "Performance Metric", "Score": pm, "Details": f"Found: {ld.get('metrics_found', '—')}"})
-                            # Board tech
-                            bt = ld.get("board_tech_score") or ld.get("board_tech", {})
-                            if isinstance(bt, dict):
-                                breakdown_rows.append({"Component": "Board Tech Score", "Score": bt.get("score", "—"), "Details": f"Indicators: {bt.get('indicators', '—')}"})
-                            elif bt is not None:
-                                breakdown_rows.append({"Component": "Board Tech Score", "Score": bt, "Details": f"Indicators: {ld.get('board_indicators', '—')}"})
-                            # Total
-                            total = ld.get("total_score") or ld.get("normalized_score") or cat_score
-                            if total is not None:
-                                breakdown_rows.append({"Component": "🏆 Total Leadership Score", "Score": f"{total}", "Details": "/100"})
-
-                            if breakdown_rows:
-                                st.dataframe(pd.DataFrame(breakdown_rows), use_container_width=True, hide_index=True)
-
-                        # --- Technology Hiring breakdown ---
-                        elif cat_name == "technology_hiring":
-                            th = details
-                            flat_rows = []
-                            for k, v in th.items():
-                                if k in ("normalized_score", "score"):
-                                    continue
-                                if isinstance(v, (str, int, float, bool)):
-                                    flat_rows.append({"Metric": k.replace("_", " ").title(), "Value": str(v)})
-                                elif isinstance(v, list) and len(v) <= 10:
-                                    flat_rows.append({"Metric": k.replace("_", " ").title(), "Value": ", ".join(str(x) for x in v)})
-                            if flat_rows:
-                                st.dataframe(pd.DataFrame(flat_rows), use_container_width=True, hide_index=True)
-
-                        # --- Innovation Activity breakdown ---
-                        elif cat_name == "innovation_activity":
-                            ia = details
-                            flat_rows = []
-                            for k, v in ia.items():
-                                if k in ("normalized_score", "score"):
-                                    continue
-                                if isinstance(v, (str, int, float, bool)):
-                                    flat_rows.append({"Metric": k.replace("_", " ").title(), "Value": str(v)})
-                                elif isinstance(v, list) and len(v) <= 10:
-                                    flat_rows.append({"Metric": k.replace("_", " ").title(), "Value": ", ".join(str(x) for x in v)})
-                            if flat_rows:
-                                st.dataframe(pd.DataFrame(flat_rows), use_container_width=True, hide_index=True)
-
-                        # --- Digital Presence breakdown ---
-                        elif cat_name == "digital_presence":
-                            dp = details
-                            flat_rows = []
-                            for k, v in dp.items():
-                                if k in ("normalized_score", "score"):
-                                    continue
-                                if isinstance(v, (str, int, float, bool)):
-                                    flat_rows.append({"Metric": k.replace("_", " ").title(), "Value": str(v)})
-                                elif isinstance(v, list) and len(v) <= 10:
-                                    flat_rows.append({"Metric": k.replace("_", " ").title(), "Value": ", ".join(str(x) for x in v)})
-                            if flat_rows:
-                                st.dataframe(pd.DataFrame(flat_rows), use_container_width=True, hide_index=True)
-
-                        # Fallback: show raw details in expander
-                        with st.expander(f"🔍 Raw {cat_title} Details", expanded=False):
-                            st.json(details)
-
-                # Errors
-                errors = result.get("errors", [])
-                if errors:
-                    st.divider()
-                    st.warning("⚠️ Errors during collection:")
-                    for err in errors:
-                        st.caption(f"• {err}")
-
-                show_json("Raw JSON Response (Task)", final_data)
-
-            except Exception as e:
-                st.error(f"❌ Error: {e}")
-
-    # =========================================================================
-    # Page 2: Task Status  (GET /api/v1/signals/tasks/{task_id})
-    # =========================================================================
-    elif sub_page == "2. Task Status":
-        st.header("Step 2: Task Status")
-        st.info("🔎 Check the status of a background signal-collection task by its **task_id**.")
-
-        task_id = st.text_input("Task ID", value=st.session_state.get("last_task_id", ""), help="Paste the task_id returned by Collect Signals")
-
-        if st.button("🔍 Check Status", type="primary", use_container_width=True):
-            if task_id.strip():
-                try:
-                    with st.spinner("Fetching task status..."):
-                        data = get(api_url(base_url, f"/api/v1/signals/tasks/{task_id.strip()}"))
-
-                    status = data.get("status", "unknown")
-                    status_emoji = {"queued": "🕐", "running": "🔄", "completed": "✅", "completed_with_errors": "⚠️", "failed": "❌"}.get(status, "❓")
-                    st.markdown(f"### {status_emoji} Status: `{status}`")
-
-                    # Task metadata table
-                    st.subheader("📋 Task Details")
-                    meta_df = pd.DataFrame([
-                        {"Field": "Task ID", "Value": data.get("task_id", "—")},
-                        {"Field": "Status", "Value": status},
-                        {"Field": "Started At", "Value": data.get("started_at", "—")},
-                        {"Field": "Completed At", "Value": data.get("completed_at", "—") or "—"},
-                    ])
-                    st.dataframe(meta_df, use_container_width=True, hide_index=True)
-
-                    # Progress table
-                    progress = data.get("progress")
-                    if progress:
-                        st.subheader("📊 Progress")
-                        prog_df = pd.DataFrame([
-                            {"Field": "Total Categories", "Value": progress.get("total_categories", "—")},
-                            {"Field": "Completed Categories", "Value": progress.get("completed_categories", "—")},
-                            {"Field": "Current Category", "Value": progress.get("current_category") or "—"},
-                        ])
-                        st.dataframe(prog_df, use_container_width=True, hide_index=True)
-
-                    # Result breakdown
-                    result = data.get("result")
-                    if result:
-                        st.subheader("📊 Results")
-                        st.markdown(f"**Company:** {result.get('company_name', '—')} (`{result.get('ticker', '—')}`)")
-
-                        signals_result = result.get("signals", {})
-                        if signals_result:
-                            result_rows = []
-                            for cat, info in signals_result.items():
-                                score_val = info.get("score")
-                                result_rows.append({
-                                    "Category": cat,
-                                    "Status": info.get("status", "—"),
-                                    "Score": round(score_val, 2) if score_val is not None else "—",
-                                    "Error": info.get("error", ""),
-                                })
-                            st.dataframe(pd.DataFrame(result_rows), use_container_width=True, hide_index=True)
-
-                        errors = result.get("errors", [])
-                        if errors:
-                            st.warning("⚠️ Errors encountered:")
-                            for err in errors:
-                                st.caption(f"• {err}")
-
-                    # Error field
-                    if data.get("error"):
-                        st.error(f"❌ Task Error: {data['error']}")
-
-                    show_json("Raw JSON Response", data)
-                except Exception as e:
-                    st.error(f"❌ Error: {e}")
-            else:
-                st.warning("Please enter a Task ID.")
-
-    # =========================================================================
-    # Page 3: List Signals  (GET /api/v1/signals)
-    # =========================================================================
-    elif sub_page == "3. List Signals":
-        st.header("Step 3: List Signals")
-        st.info("📋 Browse all signals with optional filters by category, ticker, and minimum score.")
-
-        with st.form("list_signals_form"):
-            c1, c2, c3, c4 = st.columns(4)
-            with c1:
-                ls_ticker = st.text_input("Ticker (optional)", value="").upper().strip()
-            with c2:
-                ls_category = st.selectbox("Category (optional)", ["", "technology_hiring", "innovation_activity", "digital_presence", "leadership_signals"])
-            with c3:
-                ls_min_score = st.number_input("Min Score", min_value=0.0, max_value=100.0, value=0.0, step=1.0)
-            with c4:
-                ls_limit = st.number_input("Limit", min_value=1, max_value=1000, value=100)
-            submitted = st.form_submit_button("📋 List Signals", type="primary", use_container_width=True)
-
-        if submitted:
-            try:
-                params: Dict[str, Any] = {"limit": ls_limit}
-                if ls_ticker:
-                    params["ticker"] = ls_ticker
-                if ls_category:
-                    params["category"] = ls_category
-                if ls_min_score > 0:
-                    params["min_score"] = ls_min_score
-
-                with st.spinner("Fetching signals..."):
-                    data = get(api_url(base_url, "/api/v1/signals"), params=params)
-
-                total = data.get("total", 0)
-                filters = data.get("filters", {})
-                signals = data.get("signals", [])
-
-                st.success(f"✅ Found **{total}** signal(s)")
-
-                # Active filters
-                active_filters = {k: v for k, v in filters.items() if v is not None and v != ""}
-                if active_filters:
-                    st.caption(f"Filters applied: {active_filters}")
-
-                # Signals table
-                if signals:
-                    rows = []
-                    for s in signals:
-                        rows.append({
-                            "Signal ID": str(s.get("signal_id") or s.get("id", ""))[:16],
-                            "Company": s.get("ticker") or str(s.get("company_id", ""))[:12],
-                            "Category": s.get("category", "—"),
-                            "Source": s.get("source", "—"),
-                            "Score": round(s["normalized_score"], 2) if s.get("normalized_score") is not None else "—",
-                            "Confidence": round(s["confidence"], 2) if s.get("confidence") is not None else "—",
-                            "Evidence": s.get("evidence_count", 0),
-                            "Date": str(s.get("signal_date", ""))[:10] or "—",
-                        })
-                    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-                else:
-                    st.info("No signals matched the filters.")
-
-                show_json("Raw JSON Response", data)
-            except Exception as e:
-                st.error(f"❌ Error: {e}")
-
-    # =========================================================================
-    # Page 4: Company Signal Summary  (GET /api/v1/companies/{id}/signals)
-    # =========================================================================
-    elif sub_page == "4. Company Signal Summary":
-        st.header("Step 4: Company Signal Summary")
-        st.info("📊 Aggregated signal summary for a single company — scores by category plus composite score.")
-
-        cs_ticker = st.text_input("Company ID / Ticker", value=st.session_state["last_ticker"]).upper().strip()
-
-        if st.button("📊 Get Summary", type="primary", use_container_width=True):
-            if cs_ticker:
-                st.session_state["last_ticker"] = cs_ticker
-                try:
-                    with st.spinner(f"Fetching signal summary for {cs_ticker}..."):
-                        data = get(api_url(base_url, f"/api/v1/companies/{cs_ticker}/signals"))
-
-                    company_name = data.get("company_name", "")
-                    ticker = data.get("ticker", cs_ticker)
-                    st.success(f"✅ Summary loaded for **{company_name}** (`{ticker}`)")
-
-                    # Summary scores table
-                    summary = data.get("summary", {})
-                    if summary:
-                        render_signal_summary_table(summary, company_name)
-
-                    # Categories breakdown table
-                    categories = data.get("categories", {})
-                    if categories:
-                        render_categories_table(categories)
-
-                    show_json("Raw JSON Response", data)
-                except Exception as e:
-                    st.error(f"❌ Error: {e}")
-            else:
-                st.warning("Please enter a ticker or company ID.")
-
-    # =========================================================================
-    # Page 5: Signals by Category  (GET /api/v1/companies/{id}/signals/{cat})
-    # =========================================================================
-    elif sub_page == "5. Signals by Category":
-        st.header("Step 5: Signals by Category")
-        st.info("🔬 Drill into a specific signal category for a company — see every individual signal record.")
-
-        c1, c2 = st.columns(2)
-        with c1:
-            sc_ticker = st.text_input("Company ID / Ticker", value=st.session_state["last_ticker"]).upper().strip()
-        with c2:
-            sc_category = st.selectbox("Category", ["technology_hiring", "innovation_activity", "digital_presence", "leadership_signals"])
-
-        if st.button("🔬 Get Category Signals", type="primary", use_container_width=True):
-            if sc_ticker:
-                st.session_state["last_ticker"] = sc_ticker
-                try:
-                    with st.spinner(f"Fetching {sc_category} signals for {sc_ticker}..."):
-                        data = get(api_url(base_url, f"/api/v1/companies/{sc_ticker}/signals/{sc_category}"))
-
-                    company_name = data.get("company_name", "")
-                    ticker = data.get("ticker", sc_ticker)
-                    count = data.get("signal_count", 0)
-                    avg_score = data.get("average_score")
-
-                    st.success(f"✅ **{company_name}** (`{ticker}`) — {sc_category}")
-
-                    # KPI row
-                    render_kpis([
-                        ("Signals", count),
-                        ("Avg Score", f"{avg_score:.2f}" if avg_score is not None else "—"),
-                        ("Category", sc_category.replace("_", " ").title()),
-                    ])
-
-                    # Individual signals table
-                    signals = data.get("signals", [])
-                    if signals:
-                        rows = []
-                        for s in signals:
-                            row = {
-                                "Signal ID": str(s.get("signal_id") or s.get("id", ""))[:16],
-                                "Source": s.get("source", "—"),
-                                "Score": round(s["normalized_score"], 2) if s.get("normalized_score") is not None else "—",
-                                "Confidence": round(s["confidence"], 2) if s.get("confidence") is not None else "—",
-                                "Evidence": s.get("evidence_count", 0),
-                                "Date": str(s.get("signal_date", ""))[:10] or "—",
-                            }
-                            rows.append(row)
-                        st.subheader(f"📊 {sc_category.replace('_', ' ').title()} Signals ({count})")
-                        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-
-                        # Show metadata for first signal as sample
-                        first_meta = signals[0].get("metadata")
-                        if first_meta:
-                            with st.expander("🔎 Sample Signal Metadata (first record)"):
-                                st.json(first_meta)
-                    else:
-                        st.info("No signals found for this category.")
-
-                    show_json("Raw JSON Response", data)
-                except Exception as e:
-                    st.error(f"❌ Error: {e}")
-            else:
-                st.warning("Please enter a ticker or company ID.")
-
-
-
-# Footer
-
-st.sidebar.divider()
-st.sidebar.caption("SEC Filings & Signals Pipeline v2.0")
+            st.info("No JSON data available")

@@ -50,12 +50,29 @@ _EXPANDED_AI_SKILLS = frozenset([
     "c++",
     # HPC / parallel
     "mpi", "openmp", "openacc", "infiniband",
+      # Manufacturing / Industrial (GE Aerospace)
+    "matlab", "simulink", "labview", "ansys", "catia",
+    "solidworks", "siemens nx", "scada", "plc",
+    "embedded", "c", "fortran", "vhdl",
+    "ros", "gazebo", "digital twin",
+    "predictive maintenance", "condition monitoring",
+    # Retail / Supply Chain Analytics (WMT)
+    "sql", "tableau", "power bi", "sas", "spss",
+    "excel vba", "looker", "dbt", "fivetran",
+    "ab testing", "demand forecasting",
+    # General data engineering
+    "dask", "polars", "pandas", "numpy", "scipy",
+    "java", "scala", "presto", "trino", "hive",
+    # Cloud/Enterprise analytics (WMT job descriptions)
+"bigquery", "prophet", "pydantic", "confluence",
+"ocr", "dax", "terraform", "grafana", "prometheus",
 ])
 
 # Short terms that need whole-word matching to avoid false positives
 _WHOLE_WORD_SKILLS = frozenset([
     "go", "r", "c++", "ray", "jax", "mpi", "cuda", "rust", "julia",
-    "redis", "kafka", "dvc",
+    "redis", "kafka", "dvc", "c", "sql", "sas", "ros", "plc", "dbt", "java","dax",
+
 ])
 
 # ------------------------------------------------------------------ #
@@ -63,8 +80,8 @@ _WHOLE_WORD_SKILLS = frozenset([
 # With ~50 skills in the expanded list, 15 saturates too easily.     #
 # 25 means: 25+ unique skills = zero concentration (fully distributed)#
 # ------------------------------------------------------------------ #
-_SKILL_DENOMINATOR = 25
-
+# _SKILL_DENOMINATOR = 25
+_SKILL_DENOMINATOR = 35
 
 @dataclass
 class JobAnalysis:
