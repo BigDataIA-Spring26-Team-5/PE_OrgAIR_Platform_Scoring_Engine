@@ -36,6 +36,8 @@ cryptography>=41.0.0
 python-jose[cryptography]>=3.3.0
 passlib[bcrypt]>=1.7.4
 
+rapidfuzz>=3.0.0
+
 # Data Processing
 pandas>=2.1.0
 numpy>=1.26.0
