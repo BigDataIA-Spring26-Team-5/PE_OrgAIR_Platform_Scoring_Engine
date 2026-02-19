@@ -117,6 +117,7 @@ SIGNAL_TO_DIMENSION_MAP: Dict[SignalSource, DimensionMapping] = {
         secondary_mappings={
             Dimension.TECHNOLOGY_STACK: Decimal("0.20"),
             Dimension.DATA_INFRASTRUCTURE: Decimal("0.10"),
+            Dimension.CULTURE_CHANGE: Decimal("0.10"),  # ← ADD THIS (CS3 Table 1)
         },
         reliability=Decimal("0.85"),
     ),
