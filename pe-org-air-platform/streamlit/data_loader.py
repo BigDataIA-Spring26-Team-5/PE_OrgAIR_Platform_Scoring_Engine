@@ -222,3 +222,43 @@ def get_document_stats() -> pd.DataFrame:
 @st.cache_data(ttl=60)
 def check_health() -> Optional[Dict]:
     return _api("/health")
+
+
+# ---------------------------------------------------------------------------
+# TC breakdown helpers (result JSONs store tc_breakdown as raw strings)
+# ---------------------------------------------------------------------------
+def _parse_kv_string(s: str) -> dict:
+    """Parse 'key=value key2=value2 ...' string, ignoring list-valued fields."""
+    result = {}
+    if not s or not isinstance(s, str):
+        return result
+    # stop before unique_skills=[...] list which breaks simple split
+    clean = s.split("unique_skills=")[0].strip()
+    for part in clean.split():
+        if "=" in part:
+            k, _, v = part.partition("=")
+            try:
+                result[k.strip()] = float(v.strip())
+            except ValueError:
+                pass
+    return result
+
+
+@st.cache_data(ttl=120)
+def build_tc_breakdown_df() -> pd.DataFrame:
+    """DataFrame of TC sub-components parsed from all 5 result JSONs."""
+    results = load_all_results()
+    rows = []
+    for ticker in CS3_TICKERS:
+        r = results.get(ticker)
+        if not r:
+            continue
+        bd = _parse_kv_string(r.get("tc_breakdown", ""))
+        rows.append({
+            "Ticker": ticker,
+            "leadership_ratio":    bd.get("leadership_ratio",    0.0),
+            "team_size_factor":    bd.get("team_size_factor",    0.0),
+            "skill_concentration": bd.get("skill_concentration", 0.0),
+            "individual_factor":   bd.get("individual_factor",   0.0),
+        })
+    return pd.DataFrame(rows)
