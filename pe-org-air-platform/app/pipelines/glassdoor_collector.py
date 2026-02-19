@@ -2903,9 +2903,18 @@ class CultureCollector:
         # ai_rating_baseline = Decimal(str(
         #     max(0.0, min(60.0, (avg_rating_val - 2.5) / 2.5 * 40.0))
         # ))
+        # ai_rating_baseline = Decimal(str(
+        #     max(0.0, min(80.0, (avg_rating_val - 2.0) / 3.0 * 60.0))
+        # ))
+
+        # ai_rating_baseline = Decimal(str(
+        #     max(0.0, min(80.0, (avg_rating_val - 2.0) / 3.0 * 80.0))
+        # ))
+
         ai_rating_baseline = Decimal(str(
-            max(0.0, min(80.0, (avg_rating_val - 2.0) / 3.0 * 60.0))
-        ))
+        max(0.0, min(100.0, (avg_rating_val - 1.5) / 3.0 * 100.0))
+))
+
 
         # ── Phase 4: Blend 70% keyword + 30% rating ─────────────
         KW = self.KEYWORD_WEIGHT    # 0.70
@@ -2913,7 +2922,8 @@ class CultureCollector:
 
         inn_s = KW * kw_inn + RT * rating_score
         # dd_s  = KW * kw_dd  + RT * rating_score * Decimal("0.6")   # Dampened — rating is partial proxy for data culture
-        dd_s  = KW * kw_dd  + RT * rating_score * Decimal("0.9")   # Dampened — rating is partial proxy for data culture
+        # dd_s  = KW * kw_dd  + RT * rating_score * Decimal("0.9")   # Dampened — rating is partial proxy for data culture
+        dd_s  = KW * kw_dd  + RT * rating_score * Decimal("1.0")   # was 0.9
         ai_s  = KW * kw_ai  + RT * ai_rating_baseline              # Use AI-specific baseline
         ch_s  = KW * kw_ch  + RT * rating_score
 
