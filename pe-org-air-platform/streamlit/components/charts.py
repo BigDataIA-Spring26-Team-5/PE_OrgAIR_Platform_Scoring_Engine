@@ -173,3 +173,77 @@ def signal_comparison_chart(signals_df: pd.DataFrame) -> go.Figure:
         height=400, margin=dict(t=50, b=40),
     )
     return fig
+
+
+def signal_heatmap(signals_df: pd.DataFrame) -> go.Figure:
+    """Heatmap: 5 companies × 4 external signal scores (green = high, red = low)."""
+    if signals_df.empty:
+        return go.Figure()
+
+    cols = {
+        "TECHNOLOGY_HIRING_SCORE": "Tech Hiring",
+        "INNOVATION_ACTIVITY_SCORE": "Innovation",
+        "DIGITAL_PRESENCE_SCORE": "Digital Presence",
+        "LEADERSHIP_SIGNALS_SCORE": "Leadership",
+    }
+    available = {c: l for c, l in cols.items() if c in signals_df.columns}
+    if not available or "TICKER" not in signals_df.columns:
+        return go.Figure()
+
+    z = [[float(signals_df.loc[i, c]) for c in available] for i in signals_df.index]
+    x_labels = list(available.values())
+    y_labels = signals_df["TICKER"].tolist()
+
+    fig = go.Figure(go.Heatmap(
+        z=z, x=x_labels, y=y_labels,
+        colorscale="RdYlGn", zmin=0, zmax=100,
+        text=[[f"{v:.0f}" for v in row] for row in z],
+        texttemplate="%{text}",
+        textfont=dict(size=13),
+        showscale=True,
+        colorbar=dict(title="Score", thickness=12),
+    ))
+    fig.update_layout(
+        title="Signal Score Heatmap (0–100)",
+        height=280,
+        margin=dict(t=50, b=30, l=60, r=60),
+        yaxis=dict(autorange="reversed"),
+    )
+    return fig
+
+
+def tc_breakdown_bar(tc_df: pd.DataFrame) -> go.Figure:
+    """Grouped bar: TC sub-components per company (all values 0–1)."""
+    if tc_df.empty:
+        return go.Figure()
+
+    components = [
+        ("leadership_ratio",    "Leadership Ratio",    "#6366f1"),
+        ("team_size_factor",    "Team Size Factor",    "#f59e0b"),
+        ("skill_concentration", "Skill Concentration", "#ef4444"),
+        ("individual_factor",   "Individual Factor",   "#10b981"),
+    ]
+
+    fig = go.Figure()
+    for col, label, color in components:
+        if col in tc_df.columns:
+            fig.add_trace(go.Bar(
+                name=label,
+                x=tc_df["Ticker"],
+                y=tc_df[col],
+                marker_color=color,
+                text=[f"{v:.3f}" for v in tc_df[col]],
+                textposition="outside",
+                textfont=dict(size=11),
+            ))
+
+    fig.update_layout(
+        barmode="group",
+        title="Talent Concentration — Sub-Component Values per Company",
+        yaxis=dict(title="Component Value [0–1]", range=[0, 1.25]),
+        height=420,
+        margin=dict(t=50, b=40),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        plot_bgcolor="white",
+    )
+    return fig
