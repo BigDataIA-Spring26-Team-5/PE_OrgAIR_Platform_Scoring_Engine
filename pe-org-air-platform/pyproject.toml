@@ -52,3 +52,25 @@ dev = [
     "mypy (>=1.19.1,<2.0.0)",
     "hypothesis (>=6.151.2,<7.0.0)"
 ]
+[tool.coverage.run]
+source = ["app/scoring"]
+omit = [
+    "app/scoring/integration_service.py",
+    "app/scoring/hr_calculator.py",
+    "app/scoring/position_factor.py",
+    "app/scoring/talent_concentration.py",
+]
+
+[tool.coverage.report]
+omit = [
+    "app/scripts/*",
+    "app/pipelines/*",
+    "app/repositories/*",
+    "app/services/*",
+    "app/routers/*",
+    "app/database/*",
+    "app/core/*",
+]
+
+[tool.pytest.ini_options]
+addopts = "--junitxml=test_results/test_results.xml --cov-report=html:test_results/coverage_html"
