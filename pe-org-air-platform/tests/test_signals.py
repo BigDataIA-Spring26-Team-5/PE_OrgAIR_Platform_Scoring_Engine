@@ -54,14 +54,16 @@ class TestSignalCategoryEnum:
             "technology_hiring",
             "innovation_activity",
             "digital_presence",
-            "leadership_signals"
+            "leadership_signals",
+            "glassdoor_culture",
+            "board_governance",
         ]
         actual = [c.value for c in SignalCategory]
         assert actual == expected
 
     def test_category_count(self):
-        """Test that exactly 4 signal categories exist."""
-        assert len(SignalCategory) == 4
+        """Test that exactly 6 signal categories exist."""
+        assert len(SignalCategory) == 6
 
 
 class TestSignalSourceEnum:
@@ -70,18 +72,19 @@ class TestSignalSourceEnum:
     def test_all_sources_exist(self):
         """Test that all signal sources are defined."""
         expected = [
-            "linkedin", "indeed", "glassdoor",  # Job sources
-            "uspto",  # Patent source
-            "builtwith",  # Tech stack source
-            "press_release", "company_website",  # Other sources
-            "sec_filing"  # SEC filing source
+            "linkedin", "indeed", "glassdoor",
+            "uspto",
+            "builtwith",
+            "press_release", "company_website",
+            "sec_filing",
+            "wappalyzer", "builtwith_wappalyzer", "board_proxy",
         ]
         actual = [s.value for s in SignalSource]
         assert actual == expected
 
     def test_source_count(self):
-        """Test that exactly 8 signal sources exist."""
-        assert len(SignalSource) == 8
+        """Test that exactly 11 signal sources exist."""
+        assert len(SignalSource) == 11
 
 
 

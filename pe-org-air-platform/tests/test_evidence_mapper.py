@@ -8,13 +8,11 @@ import pytest
 from decimal import Decimal
 from typing import Dict, List
 
-# Import your implementations
-import sys
-sys.path.append('/mnt/user-data/outputs')
-from evidence_mapper import (
+from app.scoring.evidence_mapper import (
     EvidenceMapper, EvidenceScore, Dimension, SignalSource, DimensionScore
 )
-from rubric_scorer import RubricScorer, RubricResult, ScoreLevel
+
+from app.scoring.rubric_scorer import RubricScorer, RubricResult, ScoreLevel
 
 
 class TestEvidenceMapper:
