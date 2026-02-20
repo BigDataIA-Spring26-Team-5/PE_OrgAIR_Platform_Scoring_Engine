@@ -76,9 +76,11 @@ The platform is built on four connected services. Every scoring request flows th
 <div align="center">
   <img src="case%20study3%20docs/architecture/cs3_architecture.png" 
        width="500" 
-       height="800" 
+       height="600" 
        alt="CS3 Architecture" />
 </div>
+
+---
 
 **How CS3 builds on CS1 and CS2:**
 
@@ -150,9 +152,11 @@ Synergy = (V^R × H^R / 100) × Alignment × TimingFactor
 <div align="center">
   <img src="case%20study3%20docs/architecture/cs3_flow.png" 
        width="500" 
-       height="700" 
+       height="600" 
        alt="CS3 Architecture" />
 </div>
+
+---
 
 The complete 9-step pipeline from evidence to final score:
 
@@ -280,6 +284,13 @@ Step 10: Persist to Snowflake (MERGE upsert) + S3 (timestamped)
 | DG | 0.5000 | 1.0000 | 1.0000 | 0.0000 | 0.3200 |
 
 ### Confidence Intervals (95%, SEM-based)
+
+<div align="center">
+  <img src="case%20study3%20docs/screenshots/confidence_interval.png" 
+       width="1200" 
+       height="400" 
+       alt="CS3 Architecture" />
+</div>
 
 | Ticker | Org-AI-R | CI Lower | CI Upper | CI Width |
 |--------|----------|----------|----------|----------|
