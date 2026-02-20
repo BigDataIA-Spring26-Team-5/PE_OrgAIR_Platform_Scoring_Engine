@@ -1,4 +1,4 @@
-# 🏢 PE Org-AI-R Platform - AI Readiness Scoring Engine
+# 🏢 PE Org-AI-R Platform : AI Readiness Scoring Engine
 
 > **Case Study 3: From Evidence to Scores**
 > Big Data and Intelligent Analytics — Spring 2026 | Team 5
