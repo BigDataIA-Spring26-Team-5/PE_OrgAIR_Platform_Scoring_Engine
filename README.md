@@ -394,17 +394,15 @@ Test results are saved in `test_results/`:
 
 ```bash
 # 1. Clone the repository
-git clone <your-repo-url>
+git clone https://github.com/BigDataIA-Spring26-Team-5/PE_OrgAIR_Platform_Scoring_Engine
 cd pe-org-air-platform
 
 # 2. Create virtual environment
-python -m venv .venv
+poetry env activate
 
 # 3. Activate virtual environment
 # Windows:
 .\.venv\Scripts\activate
-# macOS/Linux:
-source .venv/bin/activate
 
 # 4. Install dependencies
 pip install -r requirements.txt
@@ -415,7 +413,7 @@ cp .env.example .env
 #   SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, SNOWFLAKE_PASSWORD
 #   SNOWFLAKE_WAREHOUSE, SNOWFLAKE_DATABASE, SNOWFLAKE_SCHEMA
 #   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, S3_BUCKET_NAME
-#   REDIS_URL (optional)
+#   REDIS_URL 
 
 # 6. Initialize Snowflake schema
 # Run the SQL files in app/database/ in order:
@@ -438,7 +436,7 @@ streamlit run app.py
 
 The platform is already deployed and accessible:
 - **API:** https://pe-orgair-platform-scoring-engine.onrender.com/docs
-- **Dashboard:** https://pe-orgair-platform-scoring.streamlit.app/
+- **Streamlit Dashboard:** https://pe-orgair-platform-scoring.streamlit.app/
 
 ---
 
