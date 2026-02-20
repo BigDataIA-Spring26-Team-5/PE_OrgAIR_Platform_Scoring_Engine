@@ -13,12 +13,17 @@ import requests
 from data_loader import API_BASE
 
 # Paths to test result files (relative to streamlit/ parent = pe-org-air-platform/)
-_PROJECT_ROOT = Path(__file__).parent.parent
+# _PROJECT_ROOT = Path(__file__).parent.parent
+_STREAMLIT_DIR = Path(__file__).parent.parent  # streamlit/views/../ = streamlit/
+_PROJECT_ROOT = _STREAMLIT_DIR.parent           # streamlit/../ = pe-org-air-platform/
 _COVERAGE_RAW = _PROJECT_ROOT / "test_results" / "coverage_raw.json"
 _TEST_XML = _PROJECT_ROOT / "test_results" / "test_results.xml"
 _COVERAGE_MD = _PROJECT_ROOT / "test_results" / "test_coverage_report.md"
 _PROPERTY_TXT = _PROJECT_ROOT / "test_results" / "test_cases_property_based.txt"
-
+if not (_PROJECT_ROOT / "test_results").exists():
+    _PROJECT_ROOT = Path.cwd()
+if not (_PROJECT_ROOT / "test_results").exists():
+    _PROJECT_ROOT = Path.cwd().parent
 
 # ---------------------------------------------------------------------------
 # Helpers
