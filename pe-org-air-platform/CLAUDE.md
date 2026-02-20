@@ -56,7 +56,26 @@ pytest --cov=app --cov-report=html
 
 # Run tests matching pattern
 pytest -k "test_rubric_scorer"
+
+# Run property-based tests only (generates results/test_cases_property_based.txt)
+pytest tests/test_property_based.py -v
 ```
+
+### Property-Based Tests (`tests/test_property_based.py`)
+
+17 Hypothesis tests across 5 classes, all with `@settings(max_examples=500)`:
+
+| Class | Tests | Properties verified |
+|---|---|---|
+| `TestVRPropertyBased` | 5 | Bounded [0,100], monotone with scores, TC penalty monotone, uniform CV=0, deterministic |
+| `TestEvidenceMapperPropertyBased` | 3 | Always 7 dims returned, defaults to 50 with no evidence, more evidence → higher confidence |
+| `TestSynergyPropertyBased` | 3 | Bounded, zero when VR=0 or HR=0, deterministic |
+| `TestConfidencePropertyBased` | 3 | CI bounds valid, more evidence → higher reliability, deterministic |
+| `TestOrgAIRPropertyBased` | 3 | Bounded, monotone with VR, deterministic |
+
+**How the report works:** Each test has a parallel module-level counter list (`_cnt_*`) and example list (`_ex_*`). The counter appends `1` on every Hypothesis call (proving 500 ran). The example list stores up to 5 example dicts. `teardown_module()` writes `results/test_cases_property_based.txt` in write mode — the file is **overwritten on every pytest run**.
+
+`test_missing_evidence_defaults_to_50` uses `@given(st.integers())` (dummy arg) so Hypothesis generates 500 unique seeds; the test body always passes `[]` regardless. This is needed because `st.just([])` has only one unique value and Hypothesis would run it just once.
 
 ### Docker
 ```bash
@@ -371,6 +390,66 @@ Optional LLM keys (for future rubric scoring enhancements):
 - **Legacy code at file tops:** Several files (`config.py`, `pipeline2_runner.py`) contain large commented-out blocks of old implementations at the top, followed by the active code below. The live implementation is always the uncommented section.
 - **CS3 Snowflake tables:** `signal_dimension_mapping` and `evidence_dimension_scores` are created by the CS3 scoring pipeline (not in `schema.sql`). Query examples are in `Summary Files/cs3_portfolio_summary.md`.
 - **SCORING table:** Added to `schema.sql` — stores `ticker, tc, vr, pf, hr, scored_at, updated_at` (one row per company, upserted via MERGE). All three CS3 POST scorers (tc-vr, pf, hr) write to this table; GET endpoints read from it.
-- **GET endpoints for CS3 scorers:** `tc_vr_scoring.py`, `position_factor.py`, and `hr_scoring.py` each have `GET /{type}/{ticker}` and `GET /{type}/portfolio` endpoints that read from the SCORING table without recomputing. POST endpoints now also save JSON to S3 (`scoring/{type}/{ticker}/{timestamp}.json`).
+- **Breakdown tables:** Four additional Snowflake tables store sub-components per scoring run (all MERGE on ticker, one row per company):
+  - `TC_SCORING` — TC ratios, job counts (total/senior/mid/entry AI jobs, unique skills), Glassdoor signals, validation
+  - `VR_SCORING` — all 7 dimension scores, weighted_dim_score, talent_risk_adj, tc_used, validation
+  - `PF_SCORING` — vr_score_used, sector, sector_avg_vr, vr_diff, vr/mcap components, validation
+  - `HR_SCORING` — hr_base, position_factor_used, position_adjustment, sector, interpretation, validation
+- **Snowflake DDL is NOT auto-executed:** `schema.sql` is a reference file only. Run `USE DATABASE pe_orgair_db; USE SCHEMA platform;` then execute all `CREATE TABLE IF NOT EXISTS` blocks manually in Snowflake before running POST endpoints. All upserts are `try/except` non-fatal — a missing table silently logs a warning.
+- **GET endpoints for CS3 scorers:** `tc_vr_scoring.py`, `position_factor.py`, and `hr_scoring.py` each have `GET /{type}/{ticker}` and `GET /{type}/portfolio` endpoints that read from the SCORING table without recomputing. POST endpoints now also save JSON to S3 (`scoring/{type}/{ticker}/{timestamp}.json`). S3 accumulates all runs (timestamped keys); Snowflake keeps only the latest (MERGE upsert).
+- **CLAUDE.md is gitignored:** This file is listed in `.gitignore` and will not be pushed to the remote repo.
 - **Swagger tag ordering:** `openapi_tags` in `main.py` controls section display order. Router tag names were updated to match: `"health"→"Health"`, `"industries"→"Industries"`, `"companies"→"Companies"`, `"board-governance"→"Board Governance"`. Signal DELETE reset endpoints now explicitly use `tags=["Reset (Demo)"]` to appear in a separate section from `"Signals"`.
 - **13 tracked companies:** CAT, DE, UNH, HCA, ADP, PAYX, WMT, TGT, JPM, GS, NVDA, GE, DG — all defined in `COMPANY_NAME_MAPPINGS` in `config.py` with their SEC CIK numbers in `sec_edgar.py`.
+
+## Streamlit Dashboard (`streamlit/`)
+
+### Structure
+
+```
+streamlit/
+  app.py                   # Single-file multi-page app (page routing via st.sidebar selectbox)
+  data_loader.py           # All data access: Snowflake queries + local JSON loaders (cached)
+  components/
+    charts.py              # Reusable Plotly chart builders (never import px directly in app.py)
+```
+
+### Pages and Data Sources
+
+The app has 5 pages selected via sidebar. The active code begins at line ~1580 (the first ~1580 lines are legacy commented-out code — do not delete):
+
+| Page | Data Source | Key Content |
+|---|---|---|
+| `🏗️ Platform Foundation (CS1)` | Snowflake (`get_table_counts`), `GET /health` | 3-step layout: health check → schema table → API endpoints |
+| `📄 Evidence Collection (CS2)` | Snowflake (`get_document_stats`, `get_signal_summaries`) | 4-step layout: SEC filings → rubric formulae → external signals → say-do gap |
+| `⚙️ Scoring Engine (CS3)` | Local `results/{ticker}.json` via `load_all_results()` | 7-step layout: mapping heatmap → TC → V^R → PF → H^R → Org-AI-R → portfolio |
+| `🔍 Company Deep Dive` | Local `results/{ticker}.json` via `load_result()` | Per-ticker: dimension bar + waterfall chart, TC breakdown, job analysis |
+| `📊 Executive Summary` | Local JSONs + `build_portfolio_df()` + `build_dimensions_df()` | Portfolio bar chart, radar chart, dimension heatmap |
+
+### Data Loader Key Functions
+
+- `load_result(ticker)` / `load_all_results()` — reads from `results/{ticker}.json` (lowercase), cached 120s
+- `get_table_counts()` — queries all 11 Snowflake tables, returns `{TABLE_NAME: row_count}`, cached 300s
+- `get_signal_summaries()` — queries `COMPANY_SIGNAL_SUMMARIES` for the 5 CS3 tickers
+- `get_document_stats()` — queries `DOCUMENTS` for word/chunk counts grouped by ticker + filing type
+- `build_tc_breakdown_df()` — parses `tc_breakdown` raw string from result JSONs into a DataFrame
+- `_parse_kv_string(s)` — parses `"key=val key2=val2 ..."` strings; stops before `unique_skills=[...]` list
+
+**Result JSON quirk:** `tc_breakdown` and `job_analysis` are stored as raw `"key=val ..."` strings, not dicts. Use `_parse_kv_string()` to access individual fields. `dimension_scores` is a proper dict.
+
+### Charts
+
+All chart builders live in `components/charts.py` and return `go.Figure` / `px` figure objects:
+- `portfolio_bar_chart(df)` — horizontal bar with expected-range shaded bands
+- `dimension_bar_chart(labeled_dict, ticker)` — vertical bar of 7 dimension scores
+- `waterfall_chart(result, ticker)` — V^R → PF adjustment → H^R → Org-AI-R waterfall
+- `radar_chart(dims_df)` — multi-company radar overlay using `BRIGHT_COLORS`
+- `signal_heatmap(sig_df)` — 5×4 RdYlGn heatmap (companies × 4 signals), scores in cells
+- `signal_comparison_chart(sig_df)` — grouped bar of all 4 signals per company
+- `tc_breakdown_bar(tc_df)` — grouped bar of 4 TC sub-components per company
+
+### Streamlit Caching Notes
+
+- `@st.cache_data(ttl=300)` on Snowflake queries (5-min cache)
+- `@st.cache_data(ttl=120)` on result JSON loaders (2-min cache)
+- Call `st.cache_data.clear()` + `st.rerun()` to force refresh (CS1 refresh button does this)
+- Each `st.plotly_chart()` call requires a unique `key=` string to avoid widget ID collisions
