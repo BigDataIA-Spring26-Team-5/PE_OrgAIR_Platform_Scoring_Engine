@@ -14,9 +14,8 @@ AI readiness scoring platform that evaluates organizational AI maturity across a
 | Resource | URL |
 |----------|-----|
 | **Streamlit Dashboard** | [pe-orgair-platform-scoring.streamlit.app](https://pe-orgair-platform-scoring.streamlit.app/) |
-| **FastAPI (Render)** | [pe-orgair-platform-scoring-engine.onrender.com](https://pe-orgair-platform-scoring-engine.onrender.com/) |
-| **API Docs (Swagger)** | [/docs](https://pe-orgair-platform-scoring-engine.onrender.com/docs) |
-| **GitHub Repository** | *(your repo URL here)* |
+| **FastAPI (Render)** | [pe-orgair-platform-scoring-engine.onrender.com](https://pe-orgair-platform-scoring-engine.onrender.com/docs) |
+| **GitHub Repository** | [PE-Org-AIR-Platform Scoring Engine](https://github.com/BigDataIA-Spring26-Team-5/PE_OrgAIR_Platform_Scoring_Engine) |
 | **Video Demonstration** | *(your video URL here)* |
 
 ---
