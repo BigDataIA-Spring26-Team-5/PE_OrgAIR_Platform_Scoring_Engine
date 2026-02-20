@@ -55,6 +55,7 @@ dev = [
 [tool.coverage.run]
 source = ["app/scoring"]
 omit = [
+    "app/scoring/__init__.py",
     "app/scoring/integration_service.py",
     "app/scoring/hr_calculator.py",
     "app/scoring/position_factor.py",

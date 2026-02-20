@@ -367,6 +367,9 @@ def _render_live_mode():
                 )
 
     with col_btn2:
+        spacer = st.empty()
+        spacer.write("")  # empty row
+
         st.info(
             "💡 **Tip:** If the API is not running, use **Load from saved results** mode instead. "
             "The saved results were generated during the last local test run."
